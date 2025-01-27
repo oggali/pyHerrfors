@@ -1,0 +1,18 @@
+{
+  "domain": "pyherrfors",
+  "name": "Herrfors electricity seller consumption statics",
+  "codeowners": [
+    "@oggali"
+  ],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/oggali/pyHerrfors",
+  "homekit": {},
+  "iot_class": "cloud_polling",
+  "requirements": [
+    "pandas == 2.2.3", "entsoe-py == 0.6.16"
+  ],
+  "version": "0.3",
+  "ssdp": [],
+  "zeroconf": []
+}

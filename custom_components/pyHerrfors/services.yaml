@@ -1,0 +1,10 @@
+get_consumed_energy_and_prices:
+#  target:
+#    entity:
+##      integration: herrfors
+#      domain: pyherrfors
+    date:
+      required: false
+      example: "2023-01-01"
+
+force_check_latest_month:

@@ -1,8 +1,15 @@
+#custom_components/pyHerrfors/client.py
 import datetime
-
 import pandas as pd
-import requests
-from numpy.f2py.crackfortran import groupends
+import aiohttp
+import asyncio
+from entsoe import EntsoePandasClient
+import functools
+import logging
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+logger.setLevel(logging.INFO)
 
 
 class Herrfors:
@@ -16,6 +23,7 @@ class Herrfors:
         self.usage_place = usage_place
         self.customer_number = customer_number
         self.session = None
+        self.login_time = None
         self.dataSetsYear = None
         self.apikey = apikey
         self.marginal_price = marginal_price
@@ -33,58 +41,96 @@ class Herrfors:
         self.latest_day_electricity_price_euro = None
         self.latest_day_optimization_savings_eur = None
         self.latest_day_optimization_efficiency = None
-        self.latest_day_avg_price_with_alv = None
+        self.latest_day_avg_price_with_vat= None
         self.latest_day_avg_price_by_avg_spot = None
-        self.latest_day_avg_spot_price_cent_with_vat = None
+        self.latest_day_avg_spot_price_with_vat = None
         self.latest_day_avg_khw_price_with_vat = None
 
         self.latest_month_electricity_consumption = None
         self.latest_month_electricity_price_euro = None
         self.latest_month_optimization_savings_eur = None
         self.latest_month_optimization_efficiency = None
-        self.latest_month_avg_price_with_alv = None
+        self.latest_month_avg_price_with_vat = None
         self.latest_month_avg_price_by_avg_spot = None
-        self.latest_month_avg_spot_price_cent_with_vat = None
+        self.latest_month_avg_spot_price_with_vat = None
         self.latest_month_avg_khw_price_with_vat = None
+
+        self.month_consumption = None
+        self.month_prices = None
+
+        self.year_consumption = None
+        self.year_prices = None
 
         self.grouped_calculations = None
 
         self.month_group_calculations = None
         self.day_group_calculations = None
 
-    def login(self):
+    async def __aexit__(self, *err):
+        await self.session.close()
+        self.session = None
+
+    async def login(self,usage_place=None, customer_number=None):
         """
         Performs the login dance required to obtain cookies etc. for further API communication
+        async def main():
+            async with aiohttp.ClientSession() as session:
+                async with session.get('http://httpbin.org/get') as resp:
+                    logger.info(resp.status)
+                    logger.info(await resp.text())
+
+        asyncio.run(main())
+
+        session = aiohttp.ClientSession()
+        async with session.get('...'):
+            # ...
+        await session.close()
         """
-        session = requests.session()
 
         url = "https://meter.katterno.fi//index.php"
 
         # Set the login credentials
 
+        if usage_place is not None:
+            self.usage_place = usage_place
+        if customer_number is not None:
+            self.customer_number = customer_number
+
         # Set up the login data in a dictionary
         login_data = {"usageplace": self.usage_place, "customernumber": self.customer_number, "submit": "1"}
+        logger.info(f"Logging into {url} with data: {login_data}")
 
+        self.session = aiohttp.ClientSession()
         # Send a GET request to the data URL using the session object
-        login_response = session.post(url, data=login_data, verify=False)
-
-        parse_data_sets_year = login_response.text[login_response.text.find('dataSetsYear = '):login_response.text.find(';\n\tdataSetsNettedYear = ')].replace('dataSetsYear = ', '')
+        login_response = await self.session.post(url, data=login_data) # , verify=None)
+        # logger.info(login_response.status)
+        # logger.info(await login_response.text())
+        # login_response_text = login_response.text
+        login_response_text = str(await login_response.text())
+        parse_data_sets_year = login_response_text[login_response_text.find('dataSetsYear = '):login_response_text.find(';\n\tdataSetsNettedYear = ')].replace('dataSetsYear = ', '')
         self.dataSetsYear = eval(parse_data_sets_year)
 
+
         # Check the response status code to see if the login was successful
-        if login_response.status_code == 200:
-            print("Login successful")
+        # if login_response.status_code == 200:
+        if login_response.status == 200:
+            import time
+            logger.info("Login successful")
+            self.login_time = time.time()
+            # self.session = session
+            return True
         else:
-            print("Login failed")
+            logger.info("Login failed")
+            return False
 
-        self.session = session
-
-    def logout(self):
+    async def logout(self):
         """
         Closes the session by logging out
         :return: the response object
         """
-        r = self.session.get("https://meter.katterno.fi/index.php?logout&amp;lang=FIN")
+
+        r = await self.session.get("https://meter.katterno.fi/index.php?logout&amp;lang=FIN")
+        await self.__aexit__()
         return r
 
     def get_user_profile(self):
@@ -127,7 +173,7 @@ class Herrfors:
         """
 
         # if hour now is smaller than 8 then get two days later
-        if datetime.datetime.now().hour < 8:
+        if datetime.datetime.now().hour < 6:
             self._days_later = 2
         else:
             self._days_later = 1
@@ -135,26 +181,31 @@ class Herrfors:
 
         # date_yesterday = datetime.date.today() - datetime.timedelta(days=self._days_later)
 
-        self.latest_day = datetime.date.today() - datetime.timedelta(days=self._days_later)
-        self.consumption_params = {'date-year':  self.latest_day.year,
-                                  'date-month':  self.latest_day.month,
-                                  'date-day':  self.latest_day.day
-                                  }
-        self.latest_day_electricity_consumption = None
-        self.latest_day_electricity_prices = None
+        # latest day check
+        latest_day = datetime.date.today() - datetime.timedelta(days=self._days_later)
+        if self.latest_day is None or latest_day != self.latest_day:
 
-    def _check_session(self):
+            self.latest_day = latest_day
+            self.consumption_params = {'date-year':  self.latest_day.year,
+                                      'date-month':  self.latest_day.month,
+                                      'date-day':  self.latest_day.day
+                                      }
+            self.latest_day_electricity_consumption = None
+            self.latest_day_electricity_prices = None
+
+    async def _check_session(self):
 
         import time
+
         if self.session is None:
-            self.login()
-        elif (time.time() - self.session.cookies._now) / (60 * 60) > 1:
-            self.login()
+            await self.login()
+        elif (time.time() - self.login_time) / (60 * 60) > 1:
+            await self.login()
         else:
             return
 
 
-    def update_latest_day(self):
+    async def update_latest_day(self):
         """
         Updates the latest day consumption and calculates the
         average price for that day. If the user session is not
@@ -165,52 +216,140 @@ class Herrfors:
             operation.
         """
 
-        self._check_session()
+        await self._check_session()
         self._get_latest_day()
-        self.calculate_avg_price(granularity='D')
+        # delete always from year_prices because fetching these again is fairly fast
+        if self.year_prices is not None:
+            if not self.year_prices.empty:
+                self.year_prices = self.year_prices[self.year_prices['timestamp_tz'].dt.date.values != self.latest_day]
+        await self.calculate_avg_price(granularity='D')
+        logger.info(f"Day {self.latest_day} Electricity consumption was {self.latest_day_electricity_consumption_sum} kWh"
+              f"Cost was {self.latest_day_electricity_price_euro} € with avg price {self.latest_day_avg_price_with_vat} c/kWh")
+        await self.logout()
 
-    def update_latest_month(self):
-        if self.latest_day is None:
-            self._get_latest_day()
-        start_day = datetime.date(year=self.latest_day.year,month=self.latest_day.month,day=1)
+    async def update_latest_month(self, poll_always=False):
+        self._get_latest_day()
 
-        last_day = self.latest_day
-        self.latest_month =f"{self.latest_day.year}/{self.latest_day.month}"
+        if self.year_consumption is None:
+            poll_always=True
 
-        # loop dates between start_day to self._get_latest_day() store results to pd df
-        self.get_specific_day_consumption(start_day)
-        month_df = self.single_day_consumption
-        fetch_day = start_day + datetime.timedelta(days=1)
+        if self.year_consumption is not None:
+            if self.latest_day not in self.year_consumption['timestamp_tz'].dt.date.values:
+                poll_always=True
 
-        while fetch_day <= last_day:
+        if poll_always or (6 < datetime.datetime.now().hour <= 7):
+            logger.info(f"It's now {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} and we start polling data.")
 
-            self.get_specific_day_consumption(fetch_day)
-            month_df = pd.concat([month_df, self.single_day_consumption], axis=0)
-            fetch_day = fetch_day + datetime.timedelta(days=1)
+            await self._check_session()
+            start_day = datetime.date(year=self.latest_day.year,month=self.latest_day.month,day=1)
 
-        month_prices = self.get_electricity_prices(self.apikey,start_day, last_day)
+            last_day = self.latest_day
+            self.latest_month =f"{self.latest_day.year}/{self.latest_day.month}"
 
-        self.calculate_avg_price(consumption=month_df, prices=month_prices, granularity='ME')
-
-        # filter self.latest_day prices and consumption from months dataframes
-        self.latest_day_electricity_prices = month_prices[month_prices['timestamp_tz'].dt.date == self.latest_day]
-        self.latest_day_electricity_consumption = month_df[month_df['timestamp_tz'].dt.date == self.latest_day]
-        self.calculate_avg_price(consumption=self.latest_day_electricity_consumption,
-                                 prices=self.latest_day_electricity_prices,
-                                 granularity='D')
+            # delete always from year_prices because fetching these again is fairly fast
+            if self.year_prices is not None:
+                if not self.year_prices.empty:
+                    self.year_prices = self.year_prices[self.year_prices['timestamp_tz'].dt.month.values != self.latest_day.month]
 
 
+            logger.info(f"Month {self.latest_month} calculating dates between {start_day} and {last_day}")
+
+            month_df, month_prices = await asyncio.gather(self.get_specific_month_consumption(start_day, last_day),
+                                                          self.get_electricity_prices(self.apikey, start_day, last_day))
+
+            self.year_prices = pd.concat([self.year_prices, month_prices], axis=0)
+
+            self.month_consumption=month_df
+            self.month_prices=month_prices
+
+            logger.info(f"Month {self.latest_month} prices df size is {len(month_prices)} and consumption df size is {len(month_df)}")
+
+            await self.calculate_avg_price(consumption=month_df, prices=month_prices, granularity='ME')
+
+            logger.info(
+                f"Month {self.latest_month} Electricity consumption is {self.latest_month_electricity_consumption} kWh"
+                f" Cost is {self.latest_month_electricity_price_euro} € with avg price {self.latest_month_avg_khw_price_with_vat} c/kWh")
+
+            # filter self.latest_day prices and consumption from months dataframes
+            self.latest_day_electricity_prices = month_prices[month_prices['timestamp_tz'].dt.date == self.latest_day]
+            self.latest_day_electricity_consumption = month_df[month_df['timestamp_tz'].dt.date == self.latest_day]
+            await self.calculate_avg_price(consumption=self.latest_day_electricity_consumption,
+                                           prices=self.latest_day_electricity_prices,
+                                           granularity='D')
+            logger.info(
+                f"Day {self.latest_day} Electricity consumption was {self.latest_day_electricity_consumption_sum} kWh"
+                f" Cost was {self.latest_day_electricity_price_euro} € with avg price {self.latest_day_avg_khw_price_with_vat} c/kWh")
+            await self.logout()
+
+        else:
+            logger.info(f"We poll data between 6-7 UTC, it's now {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         return
 
     def update_latest_year(self):
 
         return
 
-    def get_latest_day_consumption(self):
+    async def get_latest_day_consumption(self):
 
-        return self.get_consumption(None)
+        return await self.get_consumption(None)
 
-    def get_specific_day_consumption(self, date):
+    async def get_specific_month_consumption(self, start_day=None, last_day=None, month=None):
+
+        #todo add check for dates
+        if start_day is None:
+            import calendar
+            res = calendar.monthrange(int(month.split('/')[0]),month=int(month.split('/')[1]))
+            start_day = datetime.date(year=int(month.split('/')[0]),month=int(month.split('/')[1]),day=1)
+            last_day = datetime.date(year=int(month.split('/')[0]),month=int(month.split('/')[1]),day=res[1])
+
+        # check if start_day is found from self.year_consumption
+        month_df = pd.DataFrame(columns=['timestamp_tz', 'consumption'])
+        month_df_missing = pd.DataFrame(columns=['timestamp_tz', 'consumption'])
+        if self.year_consumption is not None:
+            if start_day not in  self.year_consumption['timestamp_tz'].dt.date.values or self.year_consumption.empty:
+                # loop dates between start_day to self._get_latest_day() store results to pd df
+                await self.get_specific_day_consumption(start_day)
+                month_df_missing = self.single_day_consumption
+                self.year_consumption=pd.concat([self.year_consumption, month_df_missing], axis=0)
+            else:
+                month_df = self.year_consumption[self.year_consumption['timestamp_tz'].dt.date.values == start_day]
+        else:
+            await self.get_specific_day_consumption(start_day)
+            month_df_missing = self.single_day_consumption
+            self.year_consumption = pd.concat([self.year_consumption, month_df_missing], axis=0)
+            month_df = month_df_missing
+        fetch_day = start_day + datetime.timedelta(days=1)
+
+        fetch_tasks = []
+        while fetch_day <= last_day:
+            if self.year_consumption is not None:
+                if fetch_day not in self.year_consumption['timestamp_tz'].dt.date.values or self.year_consumption.empty:
+                    fetch_tasks.append(self.get_specific_day_consumption(fetch_day))
+                    # month_df = pd.concat([month_df, self.single_day_consumption], axis=0)
+                    # self.year_consumption = pd.concat([self.year_consumption, month_df], axis=0)
+                else:
+                    month_df = pd.concat(
+                        [month_df, self.year_consumption[self.year_consumption['timestamp_tz'].dt.date.values == fetch_day]],
+                        axis=0)
+            else:
+                fetch_tasks.append(self.get_specific_day_consumption(fetch_day))
+                # month_df = pd.concat([month_df, self.single_day_consumption], axis=0)
+                # self.year_consumption = pd.concat([self.year_consumption, month_df], axis=0)
+            fetch_day = fetch_day + datetime.timedelta(days=1)
+        if fetch_tasks:
+            results = await asyncio.gather(*fetch_tasks)
+
+            month_df_missing = pd.concat(results, ignore_index=True)
+            if not month_df.empty:
+                month_df = pd.concat([month_df, month_df_missing], axis=0)
+            else:
+                month_df = month_df_missing
+            self.year_consumption = pd.concat([self.year_consumption, month_df_missing], axis=0)
+
+        return month_df
+
+
+    async def get_specific_day_consumption(self, date):
 
         if not isinstance(date, datetime.date):
             date = datetime.date(int(date.split('-')[0]), int(date.split('-')[1]), int(date.split('-')[2]))
@@ -222,11 +361,11 @@ class Herrfors:
 
         if date < datetime.date.today():
 
-            return self.get_consumption(self.consumption_params)
+            return await self.get_consumption(self.consumption_params)
         else:
             raise ValueError
 
-    def get_consumption(self, params=None):
+    async def get_consumption(self, params=None):
         """
         Returns consumption based on parameters provided, if no parameters are provided then newest daily ones are returned
         :param params: the parameters to pass to the request,
@@ -243,7 +382,7 @@ class Herrfors:
             self._get_latest_day()
 
             params = self.consumption_params
-            print(f"No parameter given, get {self.latest_day} days consumption")
+            logger.info(f"No parameter given, get {self.latest_day} days consumption")
             params_given = False
 
         else:
@@ -257,14 +396,14 @@ class Herrfors:
             else:
                 get_param = f"{params.get('date-year')} year"
                 granularity = 'Y'
-            print(f"Getting consumption for {get_param}")
+            logger.info(f"Getting consumption for {get_param}")
 
-        self._check_session()
-        r = self.session.get(
+        await self._check_session()
+        r = await self.session.get(
             "https://meter.katterno.fi//consumption.php",
             params=params)
-
-        parse_data_sets = r.text[r.text.find('dataSetsSingleConsumption = '):r.text.find(
+        r_text = str(await r.text())
+        parse_data_sets = r_text[r_text.find('dataSetsSingleConsumption = '):r_text.find(
             ';\n\tdataSetsSingleConsumptionNetted = ')].replace('dataSetsSingleConsumption = ', '')
         data_sets_single_consumption = eval(parse_data_sets)
 
@@ -293,7 +432,9 @@ class Herrfors:
                 # Fetch data for the last 24 hours
                 day = datetime.datetime.now() - datetime.timedelta(days=self._days_later)
 
-                hours = get_hours(day)
+                loop = asyncio.get_running_loop()
+                hours = await loop.run_in_executor(None, functools.partial(get_hours,day), )
+                # hours = get_hours(day)
 
                 # Create consumption DataFrame with timezone-aware timestamps
                 consumption_df = pd.DataFrame({'timestamp_tz': hours, 'consumption': data_sets_single_consumption[0]})
@@ -303,8 +444,11 @@ class Herrfors:
                 if granularity == 'D':
 
                     day = datetime.date(params.get('date-year'),params.get('date-month'),params.get('date-day'))
+
+                    loop = asyncio.get_running_loop()
+                    hours = await loop.run_in_executor(None, functools.partial(get_hours, day), )
     
-                    hours = get_hours(day)
+                    # hours = get_hours(day)
     
                     # Create consumption DataFrame with timezone-aware timestamps
                     consumption_df = pd.DataFrame({'timestamp_tz': hours, 'consumption': data_sets_single_consumption[0]})
@@ -318,14 +462,14 @@ class Herrfors:
                     # todo handle year months
                     consumption_df = pd.DataFrame({'months': [], 'consumption': data_sets_single_consumption[0]})
 
-            return data_sets_single_consumption[0]
+            return consumption_df
         else:
-            print(f"No data available for given parameters: {params}")
+            logger.info(f"No data available for given parameters: {params}")
 
-    def get_specific_day_avg_price(self, date):
+    async def get_specific_day_avg_price(self, date):
 
-        self.get_specific_day_consumption(date)
-        return self.calculate_avg_price(consumption=self.single_day_consumption,
+        await self.get_specific_day_consumption(date)
+        return await self.calculate_avg_price(consumption=self.single_day_consumption,
                                         prices=self.get_specific_day_prices(date),
                                         granularity='D')
 
@@ -391,11 +535,11 @@ class Herrfors:
         return grouped
 
 
-    def calculate_avg_price(self, consumption=None, prices=None, granularity=None):
+    async def calculate_avg_price(self, consumption=None, prices=None, granularity=None):
 
         """
         Calculates the average electricity price based on consumption and price data inputs
-        over specified time granularities. Merges the consumption data with price data, computes
+        over specified time granularity. Merges the consumption data with price data, computes
         various aggregated statistics including marginal and VAT-inclusive prices, and organizes
         the data by granularity. The calculations also include optimization efficiency metrics
         and potential savings.
@@ -415,14 +559,14 @@ class Herrfors:
 
         if consumption is None or prices is None:
             if self.latest_day_electricity_consumption is None or self.latest_day_electricity_prices is None:
-                self.get_consumption()
-                self.get_latest_day_prices()
+                await asyncio.gather(self.get_consumption(),
+                                     self.get_latest_day_prices())
             granularity='D'
             consumption = self.latest_day_electricity_consumption
             prices = self.latest_day_electricity_prices
 
         if consumption is None:
-            print(f"Can't do electricity calculations no consumption data available ")
+            logger.info(f"Can't do electricity calculations no consumption data available ")
             return
         combine_df = pd.merge(consumption, prices, on=['timestamp_tz'], how='left', indicator=True)
 
@@ -457,9 +601,9 @@ class Herrfors:
             self.latest_day_electricity_price_euro = float(grouped['price_marg_alv_euro_sum'].iloc[0])
             self.latest_day_optimization_savings_eur = float(grouped['day_optimization_savings_eur'].iloc[0])
             self.latest_day_optimization_efficiency = float(grouped['day_optimization_efficiency'].iloc[0])
-            self.latest_day_avg_price_with_alv = float(grouped['day_avg_price_alv'].iloc[0])
+            self.latest_day_avg_price_with_vat = float(grouped['day_avg_price_alv'].iloc[0])
             self.latest_day_avg_price_by_avg_spot = float(grouped['day_avg_price_with_avg_spot'].iloc[0])
-            self.latest_day_avg_spot_price_cent_with_vat = float(grouped['prices_cent_vat_avg'].iloc[0])
+            self.latest_day_avg_spot_price_with_vat = float(grouped['prices_cent_vat_avg'].iloc[0])
             self.latest_day_avg_khw_price_with_vat = float(grouped['day_avg_khw_price_with_alv'].iloc[0])
 
         if self.latest_month is not None and granularity == 'ME' and len(grouped) > 0:
@@ -467,9 +611,9 @@ class Herrfors:
             self.latest_month_electricity_price_euro = float(grouped['price_marg_alv_euro_sum'].iloc[0])
             self.latest_month_optimization_savings_eur = float(grouped['month_optimization_savings_eur'].iloc[0])
             self.latest_month_optimization_efficiency = float(grouped['month_optimization_efficiency'].iloc[0])
-            self.latest_month_avg_price_with_alv = float(grouped['month_avg_price_alv'].iloc[0])
+            self.latest_month_avg_price_with_vat = float(grouped['month_avg_price_alv'].iloc[0])
             self.latest_month_avg_price_by_avg_spot = float(grouped['month_avg_price_with_avg_spot'].iloc[0])
-            self.latest_month_avg_spot_price_cent_with_vat = float(grouped['prices_cent_vat_avg'].iloc[0])
+            self.latest_month_avg_spot_price_with_vat = float(grouped['prices_cent_vat_avg'].iloc[0])
             self.latest_month_avg_khw_price_with_vat = float(grouped['month_avg_khw_price_with_alv'].iloc[0])
 
 
@@ -477,13 +621,13 @@ class Herrfors:
         return price_calculations, grouped
         
 
-    def get_latest_day_prices(self):
-        self.latest_day_electricity_prices = self.get_electricity_prices(apikey=self.apikey)
+    async def get_latest_day_prices(self):
+        self.latest_day_electricity_prices = await self.get_electricity_prices(apikey=self.apikey)
 
         return self.latest_day_electricity_prices
 
 
-    def get_specific_day_prices(self, date):
+    async def get_specific_day_prices(self, date):
 
 
         if not isinstance(date, pd._libs.tslibs.timestamps.Timestamp):
@@ -494,12 +638,16 @@ class Herrfors:
             start = date.normalize()
             end = start + pd.Timedelta(hours=23, minutes=59, seconds=59)
 
+            # delete always from year_prices because fetching these again is fairly fast
+            if self.year_prices is not None:
+                if not self.year_prices.empty:
+                    self.year_prices = self.year_prices[self.year_prices['timestamp_tz'].dt.date.values!=date]
 
-        return self.get_electricity_prices(self.apikey, start, end)
+        return await self.get_electricity_prices(self.apikey, start, end)
 
 
     @staticmethod
-    def get_electricity_prices(apikey=None,start=None, end=None):
+    async def get_electricity_prices(apikey=None,start=None, end=None):
         """
         Fetches electricity prices for a given date range using the Entso-E API. This method fetches
         day-ahead electricity prices for the specified country, processes the pricing data, and calculates the VAT-adjusted
@@ -523,53 +671,63 @@ class Herrfors:
         if apikey is None:
             raise ValueError ("Entso-E API key is need!")
 
-        from entsoe import EntsoePandasClient
-        client = EntsoePandasClient(api_key=apikey,
-                                    # Optional parameters:
-                                    retry_count=3,
-                                    retry_delay=5,
-                                    timeout=60)
-
-        if start is None:
-            # if hour now is smaller than 8 then get two days later
-            if datetime.datetime.now().hour < 8:
-                days_later = 2
-            else:
-                days_later = 1
-            start = pd.Timestamp.now(tz='EET') - pd.Timedelta(days=days_later)
-            start = start.normalize()
-            end = start + pd.Timedelta(hours=23, minutes=59, seconds=59)
-
-        # check that start and end are in correct format, if not modify
-        if not isinstance(start, datetime.date):
-            start = pd.Timestamp(start, tz='EET')
-        if not isinstance(end, datetime.date):
-            end = pd.Timestamp(end, tz='EET') + pd.Timedelta(hours=23, minutes=59, seconds=59)
-
-        print(f" Get prices between {start} and {end}")
 
         country_code = 'FI'
-        prices = client.query_day_ahead_prices(country_code, start=start, end=end)
+        def query_entsoe_client(apikey, start, end):
+            client = EntsoePandasClient(api_key=apikey,
+                                        # Optional parameters:
+                                        retry_count=5,
+                                        retry_delay=5,
+                                        timeout=380)
 
-        prices_df = prices.to_frame(name='prices')
-        prices_df = prices_df.reset_index().rename(columns={'index': 'datetime'})
-        prices_df['prices_cent'] = prices_df['prices'] / 10
+            if start is None:
+                # if hour now is smaller than 8 then get two days later
+                if datetime.datetime.now().hour < 8:
+                    days_later = 2
+                else:
+                    days_later = 1
+                start = pd.Timestamp.now(tz='EET') - pd.Timedelta(days=days_later)
+                start = start.normalize()
+                end = start + pd.Timedelta(hours=23, minutes=59, seconds=59)
 
-        normal_vat = 0.255
-        earlier_normal_vat = 0.24
-        discount_vat = 0.1
-        discount_time_start = '2022-12-1'
-        discount_time_end = '2023-4-30'
-        new_normal_vat_start = '2024-09-1'
+            # check that start and end are in correct format, if not modify
+            if not isinstance(start, pd._libs.tslibs.timestamps.Timestamp):
+                start = pd.Timestamp(start, tz='EET')
+            if not isinstance(end, pd._libs.tslibs.timestamps.Timestamp):
+                end = pd.Timestamp(end, tz='EET') + pd.Timedelta(hours=23, minutes=59, seconds=59)
 
-        prices_df['vat'] = prices_df['datetime'].apply(
-            lambda x: earlier_normal_vat if x < pd.Timestamp(discount_time_start, tz='EET')
-                                    or (pd.Timestamp(discount_time_end, tz='EET') < x < pd.Timestamp(new_normal_vat_start, tz='EET'))
-                                    else discount_vat if x < pd.Timestamp(new_normal_vat_start, tz='EET') else normal_vat)
+            logger.info(f" Get prices between {start} and {end}")
 
-        prices_df['prices_cent_vat'] = prices_df['prices_cent'] * (1 + prices_df['vat'])
+            return client.query_day_ahead_prices(country_code, start=start, end=end)
 
-        prices_df['timestamp_tz'] = prices_df['datetime']
+        loop = asyncio.get_running_loop()
+        prices = await loop.run_in_executor(None, functools.partial(query_entsoe_client,
+                                                                    apikey,start, end), )
 
-        return prices_df
+
+        # prices = client.query_day_ahead_prices(country_code, start=start, end=end)
+        if not prices.empty:
+            prices_df = prices.to_frame(name='prices')
+            prices_df = prices_df.reset_index().rename(columns={'index': 'datetime'})
+            prices_df['prices_cent'] = prices_df['prices'] / 10
+
+            normal_vat = 0.255
+            earlier_normal_vat = 0.24
+            discount_vat = 0.1
+            discount_time_start = '2022-12-1'
+            discount_time_end = '2023-4-30'
+            new_normal_vat_start = '2024-09-1'
+
+            prices_df['vat'] = prices_df['datetime'].apply(
+                lambda x: earlier_normal_vat if x < pd.Timestamp(discount_time_start, tz='EET')
+                                        or (pd.Timestamp(discount_time_end, tz='EET') < x < pd.Timestamp(new_normal_vat_start, tz='EET'))
+                                        else discount_vat if x < pd.Timestamp(new_normal_vat_start, tz='EET') else normal_vat)
+
+            prices_df['prices_cent_vat'] = prices_df['prices_cent'] * (1 + prices_df['vat'])
+
+            prices_df['timestamp_tz'] = prices_df['datetime']
+
+            return prices_df
+        else:
+            logger.info(f"No prices found for {start} and {end}, return was {prices}")
 

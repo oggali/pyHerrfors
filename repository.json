@@ -1,5 +1,5 @@
 {
-    "name": "Home Assistant Herrfors add-on",
+    "name": "Home Assistant Herrfors integration",
     "url": "https://github.com/oggali/pyHerrfors",
     "maintainer": "oskari"
 }
