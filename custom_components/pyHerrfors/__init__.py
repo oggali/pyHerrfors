@@ -26,11 +26,6 @@ PLATFORMS = [Platform.SENSOR]
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Home Assistant Herrfors electricity consumption from a config entry."""
 
-    # TODO 1. Create API instance
-    # usage_place = entry.options[CONF_USAGE_PLACE]
-    # customer_number = entry.options[CONF_CUSTOMER_NUMBER]
-    # marginal_price = entry.options.get(CONF_MARGINAL_PRICE,0)
-    # api_key = entry.options.get(CONF_API_KEY,None)
     herrfors_coordinator = HerrforsDataUpdateCoordinator(hass, entry)
 
     # TODO 2. Validate the API connection (and authentication)

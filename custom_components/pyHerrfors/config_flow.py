@@ -15,7 +15,6 @@ from .client import Herrfors
 
 _LOGGER = logging.getLogger(__name__)
 
-# TODO adjust the data schema to the data that you need
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_USAGE_PLACE): str, # usage_place
@@ -28,8 +27,6 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
 
 class PlaceholderHub:
     """Placeholder class to make tests pass.
-
-    TODO Remove this placeholder class and replace with things from your PyPI package.
     """
 
     def __init__(self, usage_place, customer_number) -> None:

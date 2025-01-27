@@ -295,7 +295,6 @@ class Herrfors:
 
     async def get_specific_month_consumption(self, start_day=None, last_day=None, month=None):
 
-        #todo add check for dates
         if start_day is None:
             import calendar
             res = calendar.monthrange(int(month.split('/')[0]),month=int(month.split('/')[1]))
