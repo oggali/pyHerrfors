@@ -10,6 +10,7 @@ from .client import Herrfors
 from .const import (SENSOR_TYPES,DOMAIN,CONF_USAGE_PLACE, CONF_CUSTOMER_NUMBER, CONF_MARGINAL_PRICE, CONF_API_KEY)
 
 _LOGGER = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 class HerrforsDataUpdateCoordinator(DataUpdateCoordinator):
     """Class to manage fetching data from the API."""
@@ -45,19 +46,21 @@ class HerrforsDataUpdateCoordinator(DataUpdateCoordinator):
         self._device = await self.api.login()
         await self.api.logout()
 
-    async def _async_update_data(self):
+    async def _async_update_data(self,force=False):
         """Fetch data from API endpoint.
 
         This is the place to pre-process the data to lookup tables
         so entities can quickly look up data.
         """
         try:
-            await self.api.update_latest_month()
+            _LOGGER.info("Running update from API")
+            await self.api.update_latest_month(poll_always=force)
             return self.api
         except Exception as err:
             raise UpdateFailed(f"Error communicating with API: {err}") from err
 
     async def get_specific_day_consumption(self,date):
+        _LOGGER.info(f"Fetching day {date} consumption from API")
         try:
             date_consumption = await self.api.get_specific_day_consumption(date)
             return date_consumption
@@ -65,7 +68,8 @@ class HerrforsDataUpdateCoordinator(DataUpdateCoordinator):
             raise UpdateFailed(f"Error communicating with API: {err}") from err
 
     async def force_check_latest_month(self):
+        _LOGGER.info("Running force update from API")
         try:
-            await self.api.update_latest_month(poll_always=True)
+            await self._async_update_data(True)
         except Exception as err:
             raise UpdateFailed(f"Error communicating with API: {err}") from err

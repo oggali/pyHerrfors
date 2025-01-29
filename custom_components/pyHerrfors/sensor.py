@@ -77,8 +77,8 @@ class HerrforsSensor(CoordinatorEntity, SensorEntity):
     @property
     def native_value(self):
         """Return the state of the sensor."""
-        if self.coordinator.data:
-            return getattr(self.coordinator.data, self._sensor_type)
+        if self.coordinator.api:
+            return getattr(self.coordinator.api, self._sensor_type)
         return None
 
     @property
@@ -100,3 +100,14 @@ class HerrforsSensor(CoordinatorEntity, SensorEntity):
     def should_poll(self):
         """No polling needed."""
         return False
+
+    @property
+    def extra_state_attributes(self):
+        # attributes = {'custom_extra_attribute':'testing_extra_attribute'}
+        if self._sensor_type =="latest_day":
+            attributes['day_group_calculations'] = getattr(self.coordinator.api, 'day_group_calculations').to_json(orient='records')
+
+        if self._sensor_type =="latest_month":
+            attributes['month_group_calculations'] = getattr(self.coordinator.api, 'month_group_calculations').to_json(orient='records')
+
+        return attributes

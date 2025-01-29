@@ -16,8 +16,7 @@ class Herrfors:
 
     def __init__(self, usage_place, customer_number, apikey=None, marginal_price=None):
         """
-        :param username: your e-mail address
-        :param password: your password
+
         """
         self.single_day_consumption = None
         self.usage_place = usage_place

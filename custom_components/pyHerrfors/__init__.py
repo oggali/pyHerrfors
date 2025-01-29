@@ -13,15 +13,8 @@ from .coordinator import HerrforsDataUpdateCoordinator
 from .services import async_setup_services
 
 _LOGGER = logging.getLogger(__name__)
-# PLATFORMS: list[Platform] = [Platform.SENSOR]
 PLATFORMS = [Platform.SENSOR]
 
-# async def async_setup(hass: HomeAssistant) -> bool:
-#     """Set up Herrfors services."""
-#
-#     async_setup_services(hass)
-#
-#     return True
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Home Assistant Herrfors electricity consumption from a config entry."""
