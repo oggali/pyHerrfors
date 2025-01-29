@@ -103,6 +103,7 @@ class HerrforsSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self):
+        attributes = {}
         # attributes = {'custom_extra_attribute':'testing_extra_attribute'}
         if self._sensor_type =="latest_day":
             attributes['day_group_calculations'] = getattr(self.coordinator.api, 'day_group_calculations').to_json(orient='records')
