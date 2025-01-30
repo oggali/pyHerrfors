@@ -11,6 +11,7 @@ from .const import (SENSOR_TYPES,DOMAIN,CONF_USAGE_PLACE, CONF_CUSTOMER_NUMBER, 
 
 _LOGGER = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
+_LOGGER.setLevel(logging.INFO)
 
 class HerrforsDataUpdateCoordinator(DataUpdateCoordinator):
     """Class to manage fetching data from the API."""
@@ -70,6 +71,6 @@ class HerrforsDataUpdateCoordinator(DataUpdateCoordinator):
     async def force_check_latest_month(self):
         _LOGGER.info("Running force update from API")
         try:
-            await self._async_update_data(True)
+            return await self._async_update_data(True)
         except Exception as err:
             raise UpdateFailed(f"Error communicating with API: {err}") from err

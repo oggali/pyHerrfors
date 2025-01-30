@@ -15,6 +15,7 @@ from .const import (SENSOR_TYPES,DOMAIN,CONF_USAGE_PLACE, CONF_CUSTOMER_NUMBER, 
 
 _LOGGER = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
+_LOGGER.setLevel(logging.INFO)
 
 async def async_setup_entry(hass: HomeAssistant,
     config_entry: ConfigEntry,
@@ -77,8 +78,9 @@ class HerrforsSensor(CoordinatorEntity, SensorEntity):
     @property
     def native_value(self):
         """Return the state of the sensor."""
-        if self.coordinator.api:
-            return getattr(self.coordinator.api, self._sensor_type)
+        _LOGGER.info(f"Returning for {self._sensor_type} data {getattr(self.coordinator.data, self._sensor_type)} ")
+        if self.coordinator.data:
+            return getattr(self.coordinator.data, self._sensor_type)
         return None
 
     @property
@@ -106,9 +108,9 @@ class HerrforsSensor(CoordinatorEntity, SensorEntity):
         attributes = {}
         # attributes = {'custom_extra_attribute':'testing_extra_attribute'}
         if self._sensor_type =="latest_day":
-            attributes['day_group_calculations'] = getattr(self.coordinator.api, 'day_group_calculations').to_json(orient='records')
+            attributes['day_group_calculations'] = getattr(self.coordinator.data, 'day_group_calculations').to_json(orient='records')
 
         if self._sensor_type =="latest_month":
-            attributes['month_group_calculations'] = getattr(self.coordinator.api, 'month_group_calculations').to_json(orient='records')
+            attributes['month_group_calculations'] = getattr(self.coordinator.data, 'month_group_calculations').to_json(orient='records')
 
         return attributes
