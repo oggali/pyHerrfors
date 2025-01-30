@@ -14,8 +14,6 @@ from homeassistant.core import HomeAssistant
 from .const import (SENSOR_TYPES,DOMAIN,CONF_USAGE_PLACE, CONF_CUSTOMER_NUMBER, CONF_MARGINAL_PRICE, CONF_API_KEY)
 
 _LOGGER = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
-_LOGGER.setLevel(logging.INFO)
 
 async def async_setup_entry(hass: HomeAssistant,
     config_entry: ConfigEntry,
@@ -31,7 +29,7 @@ async def async_setup_entry(hass: HomeAssistant,
 
     # Schedule daily updates at 8 AM
     async def async_update_at_8am(now):
-        _LOGGER.info("Scheduled update triggered at 8 AM")
+        _LOGGER.debug("Scheduled update triggered at 8 AM")
         await coordinator.async_refresh()
 
     async_track_time_change(hass, async_update_at_8am, hour=6, minute=0, second=0)
@@ -78,7 +76,7 @@ class HerrforsSensor(CoordinatorEntity, SensorEntity):
     @property
     def native_value(self):
         """Return the state of the sensor."""
-        _LOGGER.info(f"Returning for {self._sensor_type} data {getattr(self.coordinator.data, self._sensor_type)} ")
+        _LOGGER.debug(f"Returning for {self._sensor_type} data {getattr(self.coordinator.data, self._sensor_type)} ")
         if self.coordinator.data:
             return getattr(self.coordinator.data, self._sensor_type)
         return None
