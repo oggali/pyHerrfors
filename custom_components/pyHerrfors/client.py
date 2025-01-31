@@ -345,6 +345,7 @@ class Herrfors:
             results = await asyncio.gather(*fetch_tasks)
 
             if results is not None:
+                # todo add check if result list contains only empty dataframes
                 month_df_missing = pd.concat(results, ignore_index=True)
             if not month_df.empty and not month_df_missing.empty:
                 month_df = pd.concat([month_df, month_df_missing], axis=0)
