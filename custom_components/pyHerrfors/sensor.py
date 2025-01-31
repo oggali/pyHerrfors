@@ -105,10 +105,10 @@ class HerrforsSensor(CoordinatorEntity, SensorEntity):
     def extra_state_attributes(self):
         attributes = {}
         # attributes = {'custom_extra_attribute':'testing_extra_attribute'}
-        if self._sensor_type =="latest_day":
+        if self._sensor_type =="latest_day" and getattr(self.coordinator.data, 'day_group_calculations') is not None:
             attributes['day_group_calculations'] = getattr(self.coordinator.data, 'day_group_calculations').to_json(orient='records')
 
-        if self._sensor_type =="latest_month":
+        if self._sensor_type =="latest_month" and getattr(self.coordinator.data, 'month_group_calculations') is not None:
             attributes['month_group_calculations'] = getattr(self.coordinator.data, 'month_group_calculations').to_json(orient='records')
 
         return attributes

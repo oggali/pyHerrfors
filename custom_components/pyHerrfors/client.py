@@ -259,6 +259,7 @@ class Herrfors:
 
             if self.latest_day not in month_df['timestamp_tz'].dt.date.values:
                 logger.info(f"Latest day {self.latest_day} not found yet, so let's try again later")
+                self.latest_day = self.latest_day - datetime.timedelta(days=1)
             else:
 
                 self.year_prices = pd.concat([self.year_prices, month_prices], axis=0)
