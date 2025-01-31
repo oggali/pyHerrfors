@@ -344,12 +344,15 @@ class Herrfors:
         if fetch_tasks:
             results = await asyncio.gather(*fetch_tasks)
 
-            month_df_missing = pd.concat(results, ignore_index=True)
-            if not month_df.empty:
+            if results is not None:
+                month_df_missing = pd.concat(results, ignore_index=True)
+            if not month_df.empty and not month_df_missing.empty:
                 month_df = pd.concat([month_df, month_df_missing], axis=0)
             else:
-                month_df = month_df_missing
-            self.year_consumption = pd.concat([self.year_consumption, month_df_missing], axis=0)
+                if not month_df_missing.empty:
+                    month_df = month_df_missing
+            if not month_df_missing.empty:
+                self.year_consumption = pd.concat([self.year_consumption, month_df_missing], axis=0)
 
         return month_df
 
@@ -473,7 +476,8 @@ class Herrfors:
             if granularity == 'D':
                 # clear data from single_day_consumption df
                 self.single_day_consumption=pd.DataFrame(columns=self.single_day_consumption.columns)
-            return
+
+            return self.single_day_consumption
 
     async def get_specific_day_avg_price(self, date):
 
