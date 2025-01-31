@@ -27,12 +27,12 @@ async def async_setup_entry(hass: HomeAssistant,
     await coordinator.async_config_entry_first_refresh()
 
 
-    # Schedule daily updates at 8 AM
-    async def async_update_at_8am(now):
-        _LOGGER.debug("Scheduled update triggered at 8 AM")
-        await coordinator.async_refresh()
-
-    async_track_time_change(hass, async_update_at_8am, hour=6, minute=0, second=0)
+    # # Schedule daily updates at 8 AM
+    # async def async_update_at_8am(now):
+    #     _LOGGER.debug("Scheduled update triggered at 8 AM")
+    #     await coordinator.async_refresh()
+    #
+    # async_track_time_change(hass, async_update_at_8am, hour=6, minute=0, second=0)
 
 
 class HerrforsSensor(CoordinatorEntity, SensorEntity):

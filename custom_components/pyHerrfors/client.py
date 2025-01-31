@@ -234,9 +234,10 @@ class Herrfors:
 
         if self.year_consumption is not None:
             if self.latest_day not in self.year_consumption['timestamp_tz'].dt.date.values:
+                logger.info(f"Latest day {self.latest_day} not found from memory, so let's try to fetch it")
                 poll_always=True
 
-        if poll_always or (6 < datetime.datetime.now().hour <= 7):
+        if poll_always or (7 < datetime.datetime.now().hour <= 8):
             logger.info(f"It's now {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} and we start polling data.")
 
             await self._check_session()
@@ -256,28 +257,32 @@ class Herrfors:
             month_df, month_prices = await asyncio.gather(self.get_specific_month_consumption(start_day, last_day),
                                                           self.get_electricity_prices(self.apikey, start_day, last_day))
 
-            self.year_prices = pd.concat([self.year_prices, month_prices], axis=0)
+            if self.latest_day not in month_df['timestamp_tz'].dt.date.values:
+                logger.info(f"Latest day {self.latest_day} not found yet, so let's try again later")
+            else:
 
-            self.month_consumption=month_df
-            self.month_prices=month_prices
+                self.year_prices = pd.concat([self.year_prices, month_prices], axis=0)
 
-            logger.info(f"Month {self.latest_month} prices df size is {len(month_prices)} and consumption df size is {len(month_df)}")
+                self.month_consumption=month_df
+                self.month_prices=month_prices
 
-            await self.calculate_avg_price(consumption=month_df, prices=month_prices, granularity='ME')
+                logger.info(f"Month {self.latest_month} prices df size is {len(month_prices)} and consumption df size is {len(month_df)}")
 
-            logger.info(
-                f"Month {self.latest_month} Electricity consumption is {self.latest_month_electricity_consumption} kWh"
-                f" Cost is {self.latest_month_electricity_price_euro} € with avg price {self.latest_month_avg_khw_price_with_vat} c/kWh")
+                await self.calculate_avg_price(consumption=month_df, prices=month_prices, granularity='ME')
 
-            # filter self.latest_day prices and consumption from months dataframes
-            self.latest_day_electricity_prices = month_prices[month_prices['timestamp_tz'].dt.date == self.latest_day]
-            self.latest_day_electricity_consumption = month_df[month_df['timestamp_tz'].dt.date == self.latest_day]
-            await self.calculate_avg_price(consumption=self.latest_day_electricity_consumption,
-                                           prices=self.latest_day_electricity_prices,
-                                           granularity='D')
-            logger.info(
-                f"Day {self.latest_day} Electricity consumption was {self.latest_day_electricity_consumption_sum} kWh"
-                f" Cost was {self.latest_day_electricity_price_euro} € with avg price {self.latest_day_avg_khw_price_with_vat} c/kWh")
+                logger.info(
+                    f"Month {self.latest_month} Electricity consumption is {self.latest_month_electricity_consumption} kWh"
+                    f" Cost is {self.latest_month_electricity_price_euro} € with avg price {self.latest_month_avg_khw_price_with_vat} c/kWh")
+
+                # filter self.latest_day prices and consumption from months dataframes
+                self.latest_day_electricity_prices = month_prices[month_prices['timestamp_tz'].dt.date == self.latest_day]
+                self.latest_day_electricity_consumption = month_df[month_df['timestamp_tz'].dt.date == self.latest_day]
+                await self.calculate_avg_price(consumption=self.latest_day_electricity_consumption,
+                                               prices=self.latest_day_electricity_prices,
+                                               granularity='D')
+                logger.info(
+                    f"Day {self.latest_day} Electricity consumption was {self.latest_day_electricity_consumption_sum} kWh"
+                    f" Cost was {self.latest_day_electricity_price_euro} € with avg price {self.latest_day_avg_khw_price_with_vat} c/kWh")
             await self.logout()
 
         else:
@@ -307,15 +312,17 @@ class Herrfors:
             if start_day not in  self.year_consumption['timestamp_tz'].dt.date.values or self.year_consumption.empty:
                 # loop dates between start_day to self._get_latest_day() store results to pd df
                 await self.get_specific_day_consumption(start_day)
-                month_df_missing = self.single_day_consumption
-                self.year_consumption=pd.concat([self.year_consumption, month_df_missing], axis=0)
+                if not self.single_day_consumption.empty:
+                    month_df_missing = self.single_day_consumption
+                    self.year_consumption=pd.concat([self.year_consumption, month_df_missing], axis=0)
             else:
                 month_df = self.year_consumption[self.year_consumption['timestamp_tz'].dt.date.values == start_day]
         else:
             await self.get_specific_day_consumption(start_day)
-            month_df_missing = self.single_day_consumption
-            self.year_consumption = pd.concat([self.year_consumption, month_df_missing], axis=0)
-            month_df = month_df_missing
+            if not self.single_day_consumption.empty:
+                month_df_missing = self.single_day_consumption
+                self.year_consumption = pd.concat([self.year_consumption, month_df_missing], axis=0)
+                month_df = month_df_missing
         fetch_day = start_day + datetime.timedelta(days=1)
 
         fetch_tasks = []
@@ -463,6 +470,10 @@ class Herrfors:
             return consumption_df
         else:
             logger.info(f"No data available for given parameters: {params}")
+            if granularity == 'D':
+                # clear data from single_day_consumption df
+                self.single_day_consumption=pd.DataFrame(columns=self.single_day_consumption.columns)
+            return
 
     async def get_specific_day_avg_price(self, date):
 

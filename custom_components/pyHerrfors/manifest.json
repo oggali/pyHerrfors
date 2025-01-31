@@ -12,7 +12,7 @@
   "requirements": [
     "pandas == 2.2.3", "entsoe-py == 0.6.16"
   ],
-  "version": "0.5",
+  "version": "0.6",
   "ssdp": [],
   "zeroconf": []
 }
