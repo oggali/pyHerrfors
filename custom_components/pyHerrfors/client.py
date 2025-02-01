@@ -229,6 +229,41 @@ class Herrfors:
     async def force_update_current_year(self):
         self.year_prices = None
         self.year_consumption = None
+        logger.info("Force updating current year")
+
+        self._get_latest_day()
+
+        await self._check_session()
+
+        calc_month = 1
+        import calendar
+        while calc_month < self.latest_day.month:
+
+            res = calendar.monthrange(int(self.latest_day.year), month=int(calc_month))
+            start_day = datetime.date(year=int(self.latest_day.year), month=int(calc_month), day=1)
+            last_day = datetime.date(year=int(self.latest_day.year), month=int(calc_month), day=res[1])
+
+
+            logger.info(f"Month {self.latest_month} calculating dates between {start_day} and {last_day}")
+
+            month_df, month_prices = await asyncio.gather(self.get_specific_month_consumption(start_day, last_day),
+                                                          self.get_electricity_prices(self.apikey, start_day, last_day))
+
+            if self.year_prices is not None:
+                self.year_prices = pd.concat([self.year_prices, month_prices], axis=0)
+            else:
+                self.year_prices = month_prices
+
+            await self.calculate_avg_price(consumption=month_df, prices=month_prices, granularity='ME')
+
+            logger.info(
+                f"Month {self.latest_month} Electricity consumption is {self.latest_month_electricity_consumption} kWh"
+                f" Cost is {self.latest_month_electricity_price_euro} € with avg price {self.latest_month_avg_khw_price_with_vat} c/kWh")
+
+
+        await self.update_latest_month(True)
+
+
 
     async def update_latest_month(self, poll_always=False):
         self._get_latest_day()

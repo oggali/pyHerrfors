@@ -30,7 +30,7 @@ class HerrforsDataUpdateCoordinator(DataUpdateCoordinator):
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=datetime.timedelta(minutes=10),
+            update_interval=datetime.timedelta(hours=1),
             # update_method=self._async_update_data,
             always_update=False
         )
