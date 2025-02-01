@@ -30,7 +30,7 @@ class HerrforsDataUpdateCoordinator(DataUpdateCoordinator):
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=datetime.timedelta(hours=1),
+            update_interval=datetime.timedelta(minutes=10),
             # update_method=self._async_update_data,
             always_update=False
         )
@@ -60,6 +60,11 @@ class HerrforsDataUpdateCoordinator(DataUpdateCoordinator):
         except Exception as err:
             raise UpdateFailed(f"Error communicating with API: {err}") from err
 
+    async def update_data(self):
+        _LOGGER.info("Running update data from sensor")
+        return await self._async_update_data()
+
+
     async def get_specific_day_consumption(self,date):
         _LOGGER.info(f"Fetching day {date} consumption from API")
         try:
@@ -70,7 +75,14 @@ class HerrforsDataUpdateCoordinator(DataUpdateCoordinator):
 
     async def force_check_latest_month(self):
         _LOGGER.info("Running force update from API")
+        return await self._async_update_data(True)
+
+    async def force_update_current_year(self):
+        _LOGGER.info("Running force update from API for current year")
+
         try:
-            return await self._async_update_data(True)
+            await self.api.force_update_current_year()
+            return self.api
         except Exception as err:
             raise UpdateFailed(f"Error communicating with API: {err}") from err
+

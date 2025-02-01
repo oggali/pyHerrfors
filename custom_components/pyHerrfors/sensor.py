@@ -76,10 +76,10 @@ class HerrforsSensor(CoordinatorEntity, SensorEntity):
     @property
     def native_value(self):
         """Return the state of the sensor."""
-        _LOGGER.debug(f"Returning for {self._sensor_type} data {getattr(self.coordinator.data, self._sensor_type)} ")
-        if self.coordinator.data:
-            return getattr(self.coordinator.data, self._sensor_type)
-        return None
+        # _LOGGER.debug(f"Returning for {self._sensor_type} data {getattr(self.coordinator.data, self._sensor_type)} ")
+
+        _LOGGER.info(f"Returning for {self._sensor_type} data {getattr(self.coordinator.data, self._sensor_type)} ")
+        return getattr(self.coordinator.data, self._sensor_type)
 
     @property
     def available(self) -> bool:
@@ -95,6 +95,7 @@ class HerrforsSensor(CoordinatorEntity, SensorEntity):
     async def async_update(self):
         """Update the entity. Only used by the generic entity update service."""
         await self.coordinator.async_request_refresh()
+        # await self.coordinator.update_data()
 
     @property
     def should_poll(self):

@@ -34,6 +34,7 @@ ATTR_DATE: Final = "Date"
 
 ENERGY_PRICES_SERVICE_NAME: Final = "get_consumed_energy_and_prices"
 FORCE_CHECK_LATEST_MONTH = "force_check_latest_month"
+FORCE_UPDATE_CURRENT_YEAR = "force_update_current_year"
 
 SERVICE_SCHEMA: Final = vol.Schema(
     {
@@ -136,6 +137,17 @@ async def __force_check_latest_month(    call: ServiceCall,
 
     return
 
+async def __force_update_current_year(    call: ServiceCall,
+    *,
+    hass: HomeAssistant
+) -> ServiceResponse:
+
+    coordinator = __get_coordinator(hass, call)
+
+    await coordinator.force_update_current_year()
+
+    return
+
 @callback
 def async_setup_services(hass: HomeAssistant) -> None:
     """Set up Herrfors services."""
@@ -151,5 +163,12 @@ def async_setup_services(hass: HomeAssistant) -> None:
         DOMAIN,
         FORCE_CHECK_LATEST_MONTH,
         partial(__force_check_latest_month, hass=hass),
+
+    )
+
+    hass.services.async_register(
+        DOMAIN,
+        FORCE_CHECK_LATEST_MONTH,
+        partial(__force_update_current_year, hass=hass),
 
     )

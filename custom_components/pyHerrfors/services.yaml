@@ -8,3 +8,5 @@ get_consumed_energy_and_prices:
       example: "2023-01-01"
 
 force_check_latest_month:
+
+force_update_current_year:
