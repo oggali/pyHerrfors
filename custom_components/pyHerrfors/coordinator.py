@@ -25,14 +25,13 @@ class HerrforsDataUpdateCoordinator(DataUpdateCoordinator):
             apikey=config_entry.data.get(CONF_API_KEY, None),
             marginal_price=config_entry.data.get(CONF_MARGINAL_PRICE, 0)
         )
-        # update_interval = datetime.timedelta(days=1)
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
             update_interval=datetime.timedelta(hours=1),
-            # update_method=self._async_update_data,
-            always_update=False
+            update_method=self._async_update_data,
+            always_update=True
         )
 
     async def _async_setup(self):
@@ -77,12 +76,12 @@ class HerrforsDataUpdateCoordinator(DataUpdateCoordinator):
         _LOGGER.info("Running force update from API")
         return await self._async_update_data(True)
 
-    async def force_update_current_year(self):
+    async def force_update_current_year(self, day_level=False):
         _LOGGER.info("Running force update from API for current year")
 
         try:
-            await self.api.force_update_current_year()
-            return self.api
+            await self.api.force_update_current_year(day_level=day_level)
+            return
         except Exception as err:
             raise UpdateFailed(f"Error communicating with API: {err}") from err
 

@@ -12,6 +12,9 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from .const import (SENSOR_TYPES,DOMAIN,CONF_USAGE_PLACE, CONF_CUSTOMER_NUMBER, CONF_MARGINAL_PRICE, CONF_API_KEY)
+from datetime import timedelta
+
+SCAN_INTERVAL = timedelta(hours=1)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -64,9 +67,11 @@ class HerrforsSensor(CoordinatorEntity, SensorEntity):
         )
 
         # self._update_job = HassJob(self.async_schedule_update_ha_state)
-        self._unsub_update = None
 
         super().__init__(coordinator, sensor_type)
+        # self.coordinator.update_data()
+        # self._attr_native_value = self.native_value
+
 
     @property
     def name(self):
@@ -91,16 +96,23 @@ class HerrforsSensor(CoordinatorEntity, SensorEntity):
         self.async_on_remove(
             self.coordinator.async_add_listener(self.async_write_ha_state)
         )
+    #     # self.async_write_ha_state()
 
     async def async_update(self):
         """Update the entity. Only used by the generic entity update service."""
-        await self.coordinator.async_request_refresh()
-        # await self.coordinator.update_data()
+        # await self.coordinator.async_request_refresh()
+        await self.coordinator.update_data()
+        # return getattr(self.coordinator.data, self._sensor_type)
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data from the coordinator."""
+        self.async_write_ha_state()
 
     @property
     def should_poll(self):
         """No polling needed."""
-        return False
+        return True
 
     @property
     def extra_state_attributes(self):
@@ -108,6 +120,8 @@ class HerrforsSensor(CoordinatorEntity, SensorEntity):
         # attributes = {'custom_extra_attribute':'testing_extra_attribute'}
         if self._sensor_type =="latest_day" and getattr(self.coordinator.data, 'day_group_calculations') is not None:
             attributes['day_group_calculations'] = getattr(self.coordinator.data, 'day_group_calculations').to_json(orient='records')
+            attributes['day_electricity_price_consumption_calc'] = getattr(self.coordinator.data, 'latest_day_electricity_price_consumption_calculations').to_json(
+                orient='records')
 
         if self._sensor_type =="latest_month" and getattr(self.coordinator.data, 'month_group_calculations') is not None:
             attributes['month_group_calculations'] = getattr(self.coordinator.data, 'month_group_calculations').to_json(orient='records')

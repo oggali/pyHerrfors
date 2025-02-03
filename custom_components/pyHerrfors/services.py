@@ -21,6 +21,7 @@ from homeassistant.core import (
 )
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import selector
+from homeassistant.helpers.config_validation import boolean
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
@@ -36,9 +37,15 @@ ENERGY_PRICES_SERVICE_NAME: Final = "get_consumed_energy_and_prices"
 FORCE_CHECK_LATEST_MONTH = "force_check_latest_month"
 FORCE_UPDATE_CURRENT_YEAR = "force_update_current_year"
 
-SERVICE_SCHEMA: Final = vol.Schema(
+SERVICE_SCHEMA_GET_CONSUMPTION: Final = vol.Schema(
     {
         vol.Required(ATTR_DATE): str
+    }
+)
+
+SERVICE_SCHEMA_FORCE_UPDATE_YEAR: Final = vol.Schema(
+    {
+        vol.Optional("day_level"): bool
     }
 )
 
@@ -144,7 +151,10 @@ async def __force_update_current_year(    call: ServiceCall,
 
     coordinator = __get_coordinator(hass, call)
 
-    await coordinator.force_update_current_year()
+    __day_level = call.data.get("day_level")
+
+    await coordinator.force_update_current_year(day_level=__day_level)
+    _LOGGER.info("Successful force update of current year")
 
     return
 
@@ -156,7 +166,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
         DOMAIN,
         ENERGY_PRICES_SERVICE_NAME,
         partial(__get_specific_day_consumption, hass=hass),
-        schema=SERVICE_SCHEMA,
+        schema=SERVICE_SCHEMA_GET_CONSUMPTION,
     )
 
     hass.services.async_register(
@@ -168,7 +178,8 @@ def async_setup_services(hass: HomeAssistant) -> None:
 
     hass.services.async_register(
         DOMAIN,
-        FORCE_CHECK_LATEST_MONTH,
+        FORCE_UPDATE_CURRENT_YEAR,
         partial(__force_update_current_year, hass=hass),
+        schema=SERVICE_SCHEMA_FORCE_UPDATE_YEAR,
 
     )

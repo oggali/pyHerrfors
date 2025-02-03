@@ -127,8 +127,9 @@ class Herrfors:
         Closes the session by logging out
         :return: the response object
         """
-
-        r = await self.session.get("https://meter.katterno.fi/index.php?logout&amp;lang=FIN")
+        r = None
+        if self.session is not None or self.session:
+            r = await self.session.get("https://meter.katterno.fi/index.php?logout&amp;lang=FIN")
         await self.__aexit__()
         return r
 
@@ -226,9 +227,11 @@ class Herrfors:
               f"Cost was {self.latest_day_electricity_price_euro} € with avg price {self.latest_day_avg_price_with_vat} c/kWh")
         await self.logout()
 
-    async def force_update_current_year(self):
+    async def force_update_current_year(self, day_level=False):
         self.year_prices = None
         self.year_consumption = None
+        self.day_group_calculations = None
+        self.month_group_calculations = None
         logger.info("Force updating current year")
 
         self._get_latest_day()
@@ -243,11 +246,23 @@ class Herrfors:
             start_day = datetime.date(year=int(self.latest_day.year), month=int(calc_month), day=1)
             last_day = datetime.date(year=int(self.latest_day.year), month=int(calc_month), day=res[1])
 
-
-            logger.info(f"Month {self.latest_month} calculating dates between {start_day} and {last_day}")
+            logger.info(f"Month {int(self.latest_day.year)}-{int(calc_month)} calculating dates between {start_day} and {last_day}")
 
             month_df, month_prices = await asyncio.gather(self.get_specific_month_consumption(start_day, last_day),
                                                           self.get_electricity_prices(self.apikey, start_day, last_day))
+
+            if day_level:
+                logger.info("Update day level calculations also")
+
+                fetch_day = start_day
+
+                while fetch_day <=last_day:
+                    logger.debug(f"Calculating day level avg for {fetch_day}")
+
+                    await self.calculate_avg_price(consumption=month_df[month_df['timestamp_tz'].dt.date == fetch_day],
+                                                   prices=month_prices[month_prices['timestamp_tz'].dt.date == fetch_day],
+                                                   granularity='D')
+                    fetch_day = fetch_day + datetime.timedelta(days=1)
 
             if self.year_prices is not None:
                 self.year_prices = pd.concat([self.year_prices, month_prices], axis=0)
@@ -257,10 +272,10 @@ class Herrfors:
             await self.calculate_avg_price(consumption=month_df, prices=month_prices, granularity='ME')
 
             logger.info(
-                f"Month {self.latest_month} Electricity consumption is {self.latest_month_electricity_consumption} kWh"
+                f"Month {int(self.latest_day.year)}-{int(calc_month)} Electricity consumption is {self.latest_month_electricity_consumption} kWh"
                 f" Cost is {self.latest_month_electricity_price_euro} € with avg price {self.latest_month_avg_khw_price_with_vat} c/kWh")
 
-
+            calc_month+=1
         await self.update_latest_month(True)
 
 
@@ -272,19 +287,19 @@ class Herrfors:
             poll_always=True
 
         if self.year_consumption is not None:
-            if self.latest_day not in self.year_consumption['timestamp_tz'].dt.date.values:
+            if self.latest_day not in self.year_consumption['timestamp_tz'].dt.date.values and datetime.datetime.now().hour > 9:
                 logger.info(f"Latest day {self.latest_day} not found from memory, so let's try to fetch it")
                 poll_always=True
 
-        if self.year_prices is not None and self.year_consumption is not None:
-            # check if dataframes are same size, if not then there is data missing and we can try to poll missing ones
-            if len(self.year_consumption)!=len(self.year_prices):
+        if self.year_prices is not None and self.year_consumption is not None and not poll_always:
+            # check if dataframes are same size, if not then there is data missing, and we can try to poll missing ones
+            if len(self.year_consumption)<len(self.year_prices):
                 logger.info(f"Prices df size:{len(self.year_prices)} Consumption df size:{len(self.year_consumption)}")
                 logger.info("Let's try to fill missing days")
                 poll_always=True
 
 
-        if poll_always or (7 < datetime.datetime.now().hour <= 8):
+        if poll_always or (8 < datetime.datetime.now().hour <= 9):
             logger.info(f"It's now {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} and we start polling data.")
 
             await self._check_session()
@@ -330,6 +345,7 @@ class Herrfors:
             logger.info(
                 f"Day {self.latest_day} Electricity consumption was {self.latest_day_electricity_consumption_sum} kWh"
                 f" Cost was {self.latest_day_electricity_price_euro} € with avg price {self.latest_day_avg_khw_price_with_vat} c/kWh")
+            logger.info(f"day group size: {len(self.day_group_calculations)} month group size: {len(self.month_group_calculations)}")
             await self.logout()
 
         else:
@@ -362,6 +378,7 @@ class Herrfors:
                 if not self.single_day_consumption.empty:
                     month_df_missing = self.single_day_consumption
                     self.year_consumption=pd.concat([self.year_consumption, month_df_missing], axis=0)
+                    month_df = month_df_missing
             else:
                 month_df = self.year_consumption[self.year_consumption['timestamp_tz'].dt.date.values == start_day]
         else:
@@ -588,15 +605,17 @@ class Herrfors:
 
         self.grouped_calculations = grouped
         if granularity == 'ME':
-            grouped['month'] = f"{self.latest_day.year}-{self.latest_day.month}"
+            grouped['month'] = f"{grouped.index[0].year}-{grouped.index[0].month}"
             if self.month_group_calculations is not None:
+                self.month_group_calculations = self.month_group_calculations[self.month_group_calculations['month'].values != grouped['month'].values]
                 self.month_group_calculations=pd.concat([self.month_group_calculations,grouped], axis=0)
             else:
                 self.month_group_calculations = grouped
 
         if granularity == 'D':
-            grouped['date'] = f"{self.latest_day.year}-{self.latest_day.month}-{self.latest_day.day}"
+            grouped['date'] = f"{grouped.index[0].year}-{grouped.index[0].month}-{grouped.index[0].day}"
             if self.day_group_calculations is not None:
+                self.day_group_calculations = self.day_group_calculations[self.day_group_calculations['date'].values != grouped['date'].values]
                 self.day_group_calculations=pd.concat([self.day_group_calculations,grouped], axis=0)
             else:
                 self.day_group_calculations = grouped
