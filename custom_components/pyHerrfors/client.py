@@ -299,7 +299,7 @@ class Herrfors:
                 poll_always=True
 
 
-        if poll_always or (8 < datetime.datetime.now().hour <= 9):
+        if poll_always or (7 < datetime.datetime.now().hour <= 8):
             logger.info(f"It's now {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} and we start polling data.")
 
             await self._check_session()
@@ -478,7 +478,11 @@ class Herrfors:
         r_text = str(await r.text())
         parse_data_sets = r_text[r_text.find('dataSetsSingleConsumption = '):r_text.find(
             ';\n\tdataSetsSingleConsumptionNetted = ')].replace('dataSetsSingleConsumption = ', '')
-        data_sets_single_consumption = eval(parse_data_sets)
+        try:
+            data_sets_single_consumption = eval(parse_data_sets)
+        except Exception as e:
+            logger.error(f"Error in eval(parse_data_sets). Exception was: {e}. parse_data_sets: {parse_data_sets}")
+            data_sets_single_consumption = [[]]
 
         # sum elements inside list for check
         check_sum = sum(data_sets_single_consumption[0])

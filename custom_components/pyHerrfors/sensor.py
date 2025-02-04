@@ -14,9 +14,10 @@ from homeassistant.core import HomeAssistant
 from .const import (SENSOR_TYPES,DOMAIN,CONF_USAGE_PLACE, CONF_CUSTOMER_NUMBER, CONF_MARGINAL_PRICE, CONF_API_KEY)
 from datetime import timedelta
 
-SCAN_INTERVAL = timedelta(hours=1)
+SCAN_INTERVAL = timedelta(minutes=15)
 
 _LOGGER = logging.getLogger(__name__)
+
 
 async def async_setup_entry(hass: HomeAssistant,
     config_entry: ConfigEntry,
@@ -83,7 +84,6 @@ class HerrforsSensor(CoordinatorEntity, SensorEntity):
         """Return the state of the sensor."""
         # _LOGGER.debug(f"Returning for {self._sensor_type} data {getattr(self.coordinator.data, self._sensor_type)} ")
 
-        _LOGGER.info(f"Returning for {self._sensor_type} data {getattr(self.coordinator.data, self._sensor_type)} ")
         return getattr(self.coordinator.data, self._sensor_type)
 
     @property
@@ -100,13 +100,16 @@ class HerrforsSensor(CoordinatorEntity, SensorEntity):
 
     async def async_update(self):
         """Update the entity. Only used by the generic entity update service."""
-        # await self.coordinator.async_request_refresh()
-        await self.coordinator.update_data()
+        _LOGGER.debug(f"Sensor {self._sensor_type} async_update function call ")
+
+        await self.coordinator.async_request_refresh()
+        # await self.coordinator.update_data()
         # return getattr(self.coordinator.data, self._sensor_type)
 
     @callback
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from the coordinator."""
+        _LOGGER.debug(f"Sensor {self._sensor_type} _handle_coordinator_update function call")
         self.async_write_ha_state()
 
     @property
