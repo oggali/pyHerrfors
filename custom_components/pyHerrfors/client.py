@@ -150,7 +150,7 @@ class Herrfors:
         #https://meter.katterno.fi//consumption.php?date-year=2024&date-month=12
         #https://meter.katterno.fi//consumption.php?date-year=2024&date-month=12&date-day=19
 
-    def _get_latest_day(self):
+    def _get_latest_day(self, update_self=True):
         """
         Determines the latest day to be considered based on the current hour and calculates related parameters.
 
@@ -172,18 +172,16 @@ class Herrfors:
         :return: None
         """
 
-        # if hour now is smaller than 8 then get two days later
+        # if hour now is smaller than 6 then get two days later
         if datetime.datetime.now().hour < 6:
             self._days_later = 2
         else:
             self._days_later = 1
 
 
-        # date_yesterday = datetime.date.today() - datetime.timedelta(days=self._days_later)
-
         # latest day check
         latest_day = datetime.date.today() - datetime.timedelta(days=self._days_later)
-        if self.latest_day is None or latest_day != self.latest_day:
+        if (self.latest_day is None or latest_day != self.latest_day) and update_self:
 
             self.latest_day = latest_day
             self.consumption_params = {'date-year':  self.latest_day.year,
@@ -192,6 +190,7 @@ class Herrfors:
                                       }
             self.latest_day_electricity_consumption = None
             self.latest_day_electricity_prices = None
+        return latest_day
 
     async def _check_session(self):
 
@@ -281,14 +280,14 @@ class Herrfors:
 
 
     async def update_latest_month(self, poll_always=False):
-        self._get_latest_day()
+        latest_day = self._get_latest_day(update_self=False)
 
         if self.year_consumption is None:
             poll_always=True
 
         if self.year_consumption is not None:
-            if self.latest_day not in self.year_consumption['timestamp_tz'].dt.date.values and datetime.datetime.now().hour > 9:
-                logger.info(f"Latest day {self.latest_day} not found from memory, so let's try to fetch it")
+            if latest_day not in self.year_consumption['timestamp_tz'].dt.date.values and datetime.datetime.now().hour > 9:
+                logger.info(f"Latest day {latest_day} not found from memory, so let's try to fetch it")
                 poll_always=True
 
         if self.year_prices is not None and self.year_consumption is not None and not poll_always:
@@ -303,15 +302,15 @@ class Herrfors:
             logger.info(f"It's now {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} and we start polling data.")
 
             await self._check_session()
-            start_day = datetime.date(year=self.latest_day.year,month=self.latest_day.month,day=1)
+            start_day = datetime.date(year=latest_day.year,month=latest_day.month,day=1)
 
-            last_day = self.latest_day
-            self.latest_month =f"{self.latest_day.year}/{self.latest_day.month}"
+            last_day = latest_day
+            self.latest_month =f"{latest_day.year}/{latest_day.month}"
 
             # delete always from year_prices because fetching these again is fairly fast
             if self.year_prices is not None:
                 if not self.year_prices.empty:
-                    self.year_prices = self.year_prices[self.year_prices['timestamp_tz'].dt.month.values != self.latest_day.month]
+                    self.year_prices = self.year_prices[self.year_prices['timestamp_tz'].dt.month.values != latest_day.month]
 
 
             logger.info(f"Month {self.latest_month} calculating dates between {start_day} and {last_day}")
@@ -319,9 +318,15 @@ class Herrfors:
             month_df, month_prices = await asyncio.gather(self.get_specific_month_consumption(start_day, last_day),
                                                           self.get_electricity_prices(self.apikey, start_day, last_day))
 
-            if self.latest_day not in month_df['timestamp_tz'].dt.date.values:
-                logger.info(f"Latest day {self.latest_day} not found yet, so let's try again later")
-                self.latest_day = self.latest_day - datetime.timedelta(days=1)
+            if latest_day not in month_df['timestamp_tz'].dt.date.values:
+                logger.info(f"Latest day {latest_day} not found yet, so let's try again later")
+                if self.latest_day is None:
+                    self.latest_day = latest_day - datetime.timedelta(days=1)
+
+
+            else:
+                logger.info(f"Update self.latest_day to {latest_day}")
+                self.latest_day = latest_day
 
             self.year_prices = pd.concat([self.year_prices, month_prices], axis=0)
 

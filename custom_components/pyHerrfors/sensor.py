@@ -14,7 +14,7 @@ from homeassistant.core import HomeAssistant
 from .const import (SENSOR_TYPES,DOMAIN,CONF_USAGE_PLACE, CONF_CUSTOMER_NUMBER, CONF_MARGINAL_PRICE, CONF_API_KEY)
 from datetime import timedelta
 
-SCAN_INTERVAL = timedelta(minutes=15)
+# SCAN_INTERVAL = timedelta(minutes=15)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -69,7 +69,7 @@ class HerrforsSensor(CoordinatorEntity, SensorEntity):
 
         # self._update_job = HassJob(self.async_schedule_update_ha_state)
 
-        super().__init__(coordinator, sensor_type)
+        super().__init__(coordinator)
         # self.coordinator.update_data()
         # self._attr_native_value = self.native_value
 
@@ -96,15 +96,18 @@ class HerrforsSensor(CoordinatorEntity, SensorEntity):
         self.async_on_remove(
             self.coordinator.async_add_listener(self.async_write_ha_state)
         )
-    #     # self.async_write_ha_state()
 
-    async def async_update(self):
-        """Update the entity. Only used by the generic entity update service."""
-        _LOGGER.debug(f"Sensor {self._sensor_type} async_update function call ")
 
-        await self.coordinator.async_request_refresh()
-        # await self.coordinator.update_data()
-        # return getattr(self.coordinator.data, self._sensor_type)
+    # async def async_update(self):
+    #     """Update the entity. Only used by the generic entity update service."""
+    #     _LOGGER.debug(f"Sensor {self._sensor_type} async_update function call ")
+    #
+    #     await self.coordinator.async_request_refresh()
+    #     # await self.coordinator.update_data()
+    #     # return getattr(self.coordinator.data, self._sensor_type)
+
+    def update(self):
+        self.coordinator.async_request_refresh()
 
     @callback
     def _handle_coordinator_update(self) -> None:
@@ -115,7 +118,7 @@ class HerrforsSensor(CoordinatorEntity, SensorEntity):
     @property
     def should_poll(self):
         """No polling needed."""
-        return True
+        return False
 
     @property
     def extra_state_attributes(self):
