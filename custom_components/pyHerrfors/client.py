@@ -320,9 +320,7 @@ class Herrfors:
 
             if latest_day not in month_df['timestamp_tz'].dt.date.values:
                 logger.info(f"Latest day {latest_day} not found yet, so let's try again later")
-                if self.latest_day is None:
-                    self.latest_day = latest_day - datetime.timedelta(days=1)
-
+                self.latest_day = max(month_df['timestamp_tz'].dt.date.values)
 
             else:
                 logger.info(f"Update self.latest_day to {latest_day}")
