@@ -63,8 +63,8 @@ class HerrforsDataUpdateCoordinator(DataUpdateCoordinator):
         This is the place to pre-process the data to lookup tables
         so entities can quickly look up data.
         """
-        if (len(getattr(self.api,"year_consumption")) == len(getattr(self.api,"year_prices")) and
-                getattr(self.api,"latest_day") == (datetime.datetime.now().date() - datetime.timedelta(days=1))):
+        if (len(getattr(self.api,"year_consumption",0)) == len(getattr(self.api,"year_prices",0)) and
+                getattr(self.api,"latest_day",datetime.datetime(1920,1,1)) == (datetime.datetime.now().date() - datetime.timedelta(days=1))):
             _LOGGER.debug("Year consumption and latest day have been updated")
         else:
             try:
