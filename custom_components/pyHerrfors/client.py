@@ -352,7 +352,7 @@ class Herrfors:
             await self.logout()
 
         else:
-            logger.info(f"We dont' poll data from API every hour, it's now {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            logger.debug(f"We dont' poll data from API every hour, it's now {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         return
 
     def update_latest_year(self):

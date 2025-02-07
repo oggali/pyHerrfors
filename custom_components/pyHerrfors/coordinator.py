@@ -34,6 +34,17 @@ class HerrforsDataUpdateCoordinator(DataUpdateCoordinator):
             always_update=True
         )
 
+    def get_update_interval(self):
+        now =  datetime.datetime.now()
+        # Define morning hours (e.g., 6 AM to 10 AM)
+        morning_start =  datetime.datetime(now.year, now.month, now.day, 7)
+        morning_end =  datetime.datetime(now.year, now.month, now.day, 14)
+
+        if morning_start <= now <= morning_end:
+            return datetime.timedelta(minutes=15)  # More frequent updates in the morning
+        else:
+            return datetime.timedelta(hours=1)  # Default update interval
+
     async def _async_setup(self):
         """Set up the coordinator
 
@@ -52,12 +63,16 @@ class HerrforsDataUpdateCoordinator(DataUpdateCoordinator):
         This is the place to pre-process the data to lookup tables
         so entities can quickly look up data.
         """
-        try:
-            _LOGGER.info("Running update from API")
-            await self.api.update_latest_month(poll_always=force)
-            return self.api
-        except Exception as err:
-            raise UpdateFailed(f"Error communicating with API: {err}") from err
+        if (len(getattr(self.api,"year_consumption")) == len(getattr(self.api,"year_prices")) and
+                getattr(self.api,"latest_day") == (datetime.datetime.now().date() - datetime.timedelta(days=1))):
+            _LOGGER.debug("Year consumption and latest day have been updated")
+        else:
+            try:
+                _LOGGER.debug("Running update from API")
+                await self.api.update_latest_month(poll_always=force)
+                return self.api
+            except Exception as err:
+                raise UpdateFailed(f"Error communicating with API: {err}") from err
 
     async def update_data(self):
         _LOGGER.info("Running update data from sensor")
