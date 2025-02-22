@@ -1,4 +1,6 @@
 # custom_components/pyHerrfors/coordinator.py
+from types import NoneType
+
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.core import callback
 from homeassistant.helpers.event import async_track_time_change
@@ -13,6 +15,7 @@ _LOGGER = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 _LOGGER.setLevel(logging.INFO)
 
+
 class HerrforsDataUpdateCoordinator(DataUpdateCoordinator):
     """Class to manage fetching data from the API."""
 
@@ -25,25 +28,40 @@ class HerrforsDataUpdateCoordinator(DataUpdateCoordinator):
             apikey=config_entry.data.get(CONF_API_KEY, None),
             marginal_price=config_entry.data.get(CONF_MARGINAL_PRICE, 0)
         )
+        self.last_update = datetime.datetime.now()
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=datetime.timedelta(hours=1),
+            # update_interval=datetime.timedelta(hours=10),
             update_method=self._async_update_data,
-            always_update=True
+            always_update=False
         )
 
     def get_update_interval(self):
-        now =  datetime.datetime.now()
+        now = datetime.datetime.now()
         # Define morning hours (e.g., 6 AM to 10 AM)
-        morning_start =  datetime.datetime(now.year, now.month, now.day, 7)
-        morning_end =  datetime.datetime(now.year, now.month, now.day, 14)
+        morning_start = datetime.datetime(now.year, now.month, now.day, 7)
+        morning_end = datetime.datetime(now.year, now.month, now.day, 11)
 
-        if morning_start <= now <= morning_end:
-            return datetime.timedelta(minutes=15)  # More frequent updates in the morning
+        if self.last_update is None:
+            _LOGGER.info(f"update since there wasn't last updated")
+            return True
+        elif (len(getattr(self.api, "year_consumption", 1)) == len(getattr(self.api, "year_prices", 2)) and
+                        getattr(self.api,"latest_day",datetime.datetime(1920,1,1)) == (datetime.datetime.now().date() - datetime.timedelta(days=1))):
+            _LOGGER.info("Year consumption and latest day have been updated already")
+            return False
+
+        elif morning_start <= now <= morning_end:
+            _LOGGER.info(f"update interval 15 min")
+            return True
         else:
-            return datetime.timedelta(hours=1)  # Default update interval
+            if datetime.timedelta(minutes=50) < (now - self.last_update) < datetime.timedelta(hours=1, minutes=20) and now > morning_end:
+                _LOGGER.info(f"update interval 1 hour")
+                return True  # Default update interval
+            else:
+                _LOGGER.info(f"update only once in every hour")
+                return False
 
     async def _async_setup(self):
         """Set up the coordinator
@@ -57,26 +75,31 @@ class HerrforsDataUpdateCoordinator(DataUpdateCoordinator):
         self._device = await self.api.login()
         await self.api.logout()
 
-    async def _async_update_data(self,force=False):
+    async def _async_update_data(self,force=False,*_):
         """Fetch data from API endpoint.
 
         This is the place to pre-process the data to lookup tables
         so entities can quickly look up data.
         """
-        if (len(getattr(self.api,"year_consumption",0)) == len(getattr(self.api,"year_prices",0)) and
-                getattr(self.api,"latest_day",datetime.datetime(1920,1,1)) == (datetime.datetime.now().date() - datetime.timedelta(days=1))):
-            _LOGGER.debug("Year consumption and latest day have been updated")
-        else:
-            try:
-                _LOGGER.debug("Running update from API")
-                await self.api.update_latest_month(poll_always=force)
-                return self.api
-            except Exception as err:
-                raise UpdateFailed(f"Error communicating with API: {err}") from err
+        try:
+            _LOGGER.info("Try to update data from API")
+            await self.api.update_latest_month(poll_always=force)
+            self.last_update = datetime.datetime.now()
+            self.async_update_listeners() # notifies all listeners(e.g. sensors) to update their data
+            return self.api
+        except Exception as err:
+            raise UpdateFailed(f"Error communicating with API: {err}") from err
 
-    async def update_data(self):
+    async def update_data(self,*_):
         _LOGGER.info("Running update data from sensor")
-        return await self._async_update_data()
+        if self.get_update_interval():
+            _LOGGER.info("Refresh sensor data")
+            await self._async_update_data()
+            self.async_update_listeners()
+            return self.api
+        else:
+            _LOGGER.info("Return api data")
+            return self.api
 
 
     async def get_specific_day_consumption(self,date):
@@ -96,7 +119,8 @@ class HerrforsDataUpdateCoordinator(DataUpdateCoordinator):
 
         try:
             await self.api.force_update_current_year(day_level=day_level)
-            return
+            self.async_update_listeners()
+            return self.api
         except Exception as err:
             raise UpdateFailed(f"Error communicating with API: {err}") from err
 

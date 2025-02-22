@@ -2,7 +2,7 @@
 # custom_components/pyHerrfors/const.py
 from datetime import timedelta
 
-DEFAULT_SCAN_INTERVAL = timedelta(hours=1)
+# DEFAULT_SCAN_INTERVAL = timedelta(hours=1)
 DOMAIN = "pyherrfors"
 SENSOR_TYPES = {
     "latest_day": "Latest Day",
