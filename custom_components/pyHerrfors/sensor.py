@@ -1,7 +1,7 @@
 # custom_components/pyHerrfors/sensor.py
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.core import callback
-from homeassistant.helpers.event import async_track_time_change, async_track_utc_time_change
+from homeassistant.helpers.event import async_track_time_change, async_track_utc_time_change, async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
@@ -11,12 +11,16 @@ from .coordinator import HerrforsDataUpdateCoordinator
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.components.sensor import SensorStateClass, SensorDeviceClass
+from homeassistant.const import UnitOfEnergy, CURRENCY_EURO
 from .const import (SENSOR_TYPES,DOMAIN,CONF_USAGE_PLACE, CONF_CUSTOMER_NUMBER, CONF_MARGINAL_PRICE, CONF_API_KEY)
 from datetime import timedelta
 
 # SCAN_INTERVAL = timedelta(minutes=15)
 
 _LOGGER = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+_LOGGER.setLevel(logging.INFO)
 
 
 async def async_setup_entry(hass: HomeAssistant,
@@ -30,13 +34,10 @@ async def async_setup_entry(hass: HomeAssistant,
 
     await coordinator.async_config_entry_first_refresh()
 
-
-    # # Schedule daily updates at 8 AM
-    # async def async_update_at_8am(now):
-    #     _LOGGER.debug("Scheduled update triggered at 8 AM")
-    #     await coordinator.async_refresh()
-    #
-    # async_track_time_change(hass, async_update_at_8am, hour=6, minute=0, second=0)
+    # define sensor update call function and interval or other related trigger
+    async_track_time_interval(
+        hass, coordinator.update_data, datetime.timedelta(minutes=15)
+    )
 
 
 class HerrforsSensor(CoordinatorEntity, SensorEntity):
@@ -53,6 +54,24 @@ class HerrforsSensor(CoordinatorEntity, SensorEntity):
 
         if sensor_type not in  ["latest_day","latest_month"]:
             self._attr_suggested_display_precision = 3
+
+        if sensor_type == "latest_day":
+            self._attr_device_class = SensorDeviceClass.DATE
+
+        if "price_euro" in sensor_type or "savings_eur" in sensor_type:
+            self._attr_state_class = SensorStateClass.TOTAL
+            self._attr_native_unit_of_measurement = CURRENCY_EURO
+        elif "consumption" in sensor_type:
+            self._attr_state_class = SensorStateClass.TOTAL
+            self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+            self._attr_device_class = SensorDeviceClass.ENERGY
+        elif "avg" in sensor_type and "price" in sensor_type:
+            self._attr_state_class = SensorStateClass.TOTAL
+            self._attr_native_unit_of_measurement = "c/kWh"
+        else:
+            self._attr_native_unit_of_measurement = None
+
+
 
         self._attr_device_info = DeviceInfo(
             entry_type=DeviceEntryType.SERVICE,
@@ -83,7 +102,6 @@ class HerrforsSensor(CoordinatorEntity, SensorEntity):
     def native_value(self):
         """Return the state of the sensor."""
         # _LOGGER.debug(f"Returning for {self._sensor_type} data {getattr(self.coordinator.data, self._sensor_type)} ")
-
         return getattr(self.coordinator.data, self._sensor_type)
 
     @property
@@ -96,15 +114,6 @@ class HerrforsSensor(CoordinatorEntity, SensorEntity):
         self.async_on_remove(
             self.coordinator.async_add_listener(self.async_write_ha_state)
         )
-
-
-    # async def async_update(self):
-    #     """Update the entity. Only used by the generic entity update service."""
-    #     _LOGGER.debug(f"Sensor {self._sensor_type} async_update function call ")
-    #
-    #     await self.coordinator.async_request_refresh()
-    #     # await self.coordinator.update_data()
-    #     # return getattr(self.coordinator.data, self._sensor_type)
 
     def update(self):
         self.coordinator.async_request_refresh()
@@ -123,13 +132,42 @@ class HerrforsSensor(CoordinatorEntity, SensorEntity):
     @property
     def extra_state_attributes(self):
         attributes = {}
-        # attributes = {'custom_extra_attribute':'testing_extra_attribute'}
         if self._sensor_type =="latest_day" and getattr(self.coordinator.data, 'day_group_calculations') is not None:
-            attributes['day_group_calculations'] = getattr(self.coordinator.data, 'day_group_calculations').to_json(orient='records')
-            attributes['day_electricity_price_consumption_calc'] = getattr(self.coordinator.data, 'latest_day_electricity_price_consumption_calculations').to_json(
-                orient='records')
+            # attributes['day_group_calculations'] = getattr(self.coordinator.data, 'day_group_calculations').to_json(orient='records')
+            attributes['day'] = getattr(self.coordinator.data, 'day_group_calculations').reset_index()['timestamp_tz'].apply(lambda x:x.isoformat()).to_list()
+            attributes['consumption_sum'] = getattr(self.coordinator.data, 'day_group_calculations')['consumption_sum'].to_list()
+            attributes['avg_khw_price_with_alv'] = getattr(self.coordinator.data, 'day_group_calculations')[
+                'day_avg_khw_price_with_alv'].to_list()
+            attributes['electricity_price_euro'] = getattr(self.coordinator.data, 'day_group_calculations')[
+                'price_marg_alv_euro_sum'].to_list()
+            attributes['avg_spot_price_with_vat'] = getattr(self.coordinator.data, 'day_group_calculations')[
+                'prices_cent_vat_avg'].to_list()
 
+            # attributes['day_electricity_price_consumption_calc'] = getattr(self.coordinator.data, 'latest_day_electricity_price_consumption_calculations').to_json(
+            #     orient='records')
+            attributes['timestamp_tz'] = getattr(self.coordinator.data,
+                                                                           'latest_day_electricity_price_consumption_calculations')['timestamp_tz'].apply(lambda x:x.isoformat()).to_list()
+            attributes['consumption'] = getattr(self.coordinator.data,
+                                                 'latest_day_electricity_price_consumption_calculations')[
+                'consumption'].to_list()
+            attributes['price_marginal_alv'] = getattr(self.coordinator.data,
+                                                'latest_day_electricity_price_consumption_calculations')[
+                'price_marginal_alv'].to_list()
+            attributes['consumption_price_marginal_alv'] = getattr(self.coordinator.data,
+                                                       'latest_day_electricity_price_consumption_calculations')[
+                'price_marg_alv'].to_list()
         if self._sensor_type =="latest_month" and getattr(self.coordinator.data, 'month_group_calculations') is not None:
             attributes['month_group_calculations'] = getattr(self.coordinator.data, 'month_group_calculations').to_json(orient='records')
+
+            attributes['month'] = getattr(self.coordinator.data, 'month_group_calculations').reset_index()[
+                'timestamp_tz'].apply(lambda x: x.isoformat()).to_list()
+            attributes['consumption_sum'] = getattr(self.coordinator.data, 'month_group_calculations')[
+                'consumption_sum'].to_list()
+            attributes['avg_khw_price_with_alv'] = getattr(self.coordinator.data, 'month_group_calculations')[
+                'month_avg_khw_price_with_alv'].to_list()
+            attributes['electricity_price_euro'] = getattr(self.coordinator.data, 'month_group_calculations')[
+                'price_marg_alv_euro_sum'].to_list()
+            attributes['avg_spot_price_with_vat'] = getattr(self.coordinator.data, 'month_group_calculations')[
+                'prices_cent_vat_avg'].to_list()
 
         return attributes
