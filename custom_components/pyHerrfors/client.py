@@ -239,11 +239,13 @@ class Herrfors:
 
         calc_month = 1
         import calendar
-        while calc_month < self.latest_day.month:
+        while calc_month <= self.latest_day.month:
 
             res = calendar.monthrange(int(self.latest_day.year), month=int(calc_month))
             start_day = datetime.date(year=int(self.latest_day.year), month=int(calc_month), day=1)
             last_day = datetime.date(year=int(self.latest_day.year), month=int(calc_month), day=res[1])
+            if calc_month == self.latest_day.month:
+                last_day = self.latest_day
 
             logger.info(f"Month {int(self.latest_day.year)}-{int(calc_month)} calculating dates between {start_day} and {last_day}")
 
@@ -257,10 +259,14 @@ class Herrfors:
 
                 while fetch_day <=last_day:
                     logger.debug(f"Calculating day level avg for {fetch_day}")
+                    if fetch_day not in month_df['timestamp_tz'].dt.date.values:
+                        logger.info(f"day {fetch_day} not found yet from consumption info, so let's try again later")
 
-                    await self.calculate_avg_price(consumption=month_df[month_df['timestamp_tz'].dt.date == fetch_day],
-                                                   prices=month_prices[month_prices['timestamp_tz'].dt.date == fetch_day],
-                                                   granularity='D')
+                    else:
+
+                        await self.calculate_avg_price(consumption=month_df[month_df['timestamp_tz'].dt.date == fetch_day],
+                                                       prices=month_prices[month_prices['timestamp_tz'].dt.date == fetch_day],
+                                                       granularity='D')
                     fetch_day = fetch_day + datetime.timedelta(days=1)
 
             if self.year_prices is not None:
@@ -352,7 +358,7 @@ class Herrfors:
             await self.logout()
 
         else:
-            logger.debug(f"We dont' poll data from API every hour, it's now {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            logger.info(f"We dont' poll data from API every hour, it's now {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         return
 
     def update_latest_year(self):
@@ -412,8 +418,10 @@ class Herrfors:
             results = await asyncio.gather(*fetch_tasks)
 
             if results is not None:
-                # todo add check if result list contains only empty dataframes
-                month_df_missing = pd.concat(results, ignore_index=True)
+                # Filter out empty DataFrames
+                filtered_results = [df for df in results if not df.empty]
+                if filtered_results:
+                    month_df_missing = pd.concat(filtered_results, ignore_index=True)
             if not month_df.empty and not month_df_missing.empty:
                 month_df = pd.concat([month_df, month_df_missing], axis=0)
             else:
