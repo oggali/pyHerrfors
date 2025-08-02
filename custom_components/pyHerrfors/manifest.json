@@ -10,9 +10,9 @@
   "homekit": {},
   "iot_class": "cloud_polling",
   "requirements": [
-    "pandas == 2.2.3", "entsoe-py == 0.6.16"
+    "pandas >= 2.3.1", "entsoe-py == 0.6.16"
   ],
-  "version": "0.9.6",
+  "version": "2025.08.02",
   "ssdp": [],
   "zeroconf": []
 }
