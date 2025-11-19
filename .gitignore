@@ -16,3 +16,4 @@
 /compose.yml
 /Dockerfile
 /testing.py
+/custom_components/pyHerrfors/testing/
