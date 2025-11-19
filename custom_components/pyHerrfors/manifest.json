@@ -12,7 +12,7 @@
   "requirements": [
     "pandas >= 2.2.3", "entsoe-py == 0.6.16", "duckdb == 1.4.2"
   ],
-  "version": "2025.11.19",
+  "version": "2025.11.19.01",
   "ssdp": [],
   "zeroconf": []
 }
