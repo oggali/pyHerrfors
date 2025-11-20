@@ -36,7 +36,7 @@ class PlaceholderHub:
 
     async def authenticate(self,email, password) -> bool:
         """Test if we can authenticate with the host."""
-        auth = await self.host.get_session_token(email, password)
+        auth =  self.host.get_session_token(email, password)
         await self.host.logout()
         return auth
 
