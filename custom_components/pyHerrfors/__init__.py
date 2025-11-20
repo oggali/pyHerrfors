@@ -8,7 +8,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 
-from .const import (DOMAIN,CONF_USAGE_PLACE, CONF_CUSTOMER_NUMBER, CONF_MARGINAL_PRICE, CONF_API_KEY)
+from .const import (DOMAIN,CONF_EMAIL, CONF_PASSWORD, CONF_MARGINAL_PRICE, CONF_API_KEY)
 from .coordinator import HerrforsDataUpdateCoordinator
 from .services import async_setup_services
 

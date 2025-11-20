@@ -25,7 +25,9 @@ SENSOR_TYPES = {
     "latest_month_avg_khw_price_with_vat": "Latest Month avg khw price with vat"
 }
 
-CONF_USAGE_PLACE = "Usage_Place"
-CONF_CUSTOMER_NUMBER = "Customer_meter_number"
+# CONF_USAGE_PLACE = "Usage_Place"
+# CONF_CUSTOMER_NUMBER = "Customer_meter_number"
+CONF_EMAIL = "Email"
+CONF_PASSWORD = "<PASSWORD>"
 CONF_MARGINAL_PRICE = "Electricity_Marginal_Price"
 CONF_API_KEY = " Entso-E api_key"

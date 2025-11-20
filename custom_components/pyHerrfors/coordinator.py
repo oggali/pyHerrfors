@@ -9,7 +9,7 @@ import datetime
 import logging
 from .client import Herrfors
 
-from .const import (SENSOR_TYPES,DOMAIN,CONF_USAGE_PLACE, CONF_CUSTOMER_NUMBER, CONF_MARGINAL_PRICE, CONF_API_KEY)
+from .const import (SENSOR_TYPES,DOMAIN,CONF_EMAIL, CONF_PASSWORD, CONF_MARGINAL_PRICE, CONF_API_KEY)
 
 _LOGGER = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -23,8 +23,8 @@ class HerrforsDataUpdateCoordinator(DataUpdateCoordinator):
         """Initialize the data updater."""
         self.config_entry = config_entry
         self.api = Herrfors(
-            usage_place=config_entry.data[CONF_USAGE_PLACE],
-            customer_number=config_entry.data[CONF_CUSTOMER_NUMBER],
+            email=config_entry.data[CONF_EMAIL],
+            password=config_entry.data[CONF_PASSWORD],
             apikey=config_entry.data.get(CONF_API_KEY, None),
             marginal_price=config_entry.data.get(CONF_MARGINAL_PRICE, 0)
         )

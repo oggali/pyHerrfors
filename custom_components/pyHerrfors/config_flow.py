@@ -10,15 +10,15 @@ from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 
-from .const import (DOMAIN,CONF_USAGE_PLACE, CONF_CUSTOMER_NUMBER, CONF_MARGINAL_PRICE, CONF_API_KEY)
+from .const import (DOMAIN,CONF_EMAIL, CONF_PASSWORD, CONF_MARGINAL_PRICE, CONF_API_KEY)
 from .client import Herrfors
 
 _LOGGER = logging.getLogger(__name__)
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
-        vol.Required(CONF_USAGE_PLACE): str, # usage_place
-        vol.Required(CONF_CUSTOMER_NUMBER): str,  # customer_number
+        vol.Required(CONF_EMAIL): str, # email
+        vol.Required(CONF_PASSWORD): str,  # password
         vol.Optional(CONF_MARGINAL_PRICE): float, # marginal_price
         vol.Optional(CONF_API_KEY): str, # entso-e api key
     }
@@ -29,14 +29,14 @@ class PlaceholderHub:
     """Placeholder class to make tests pass.
     """
 
-    def __init__(self, usage_place, customer_number) -> None:
+    def __init__(self,email, password) -> None:
         """Initialize."""
 
-        self.host = Herrfors(usage_place, customer_number)
+        self.host = Herrfors(email, password)
 
-    async def authenticate(self,usage_place, customer_number) -> bool:
+    async def authenticate(self,email, password) -> bool:
         """Test if we can authenticate with the host."""
-        auth = await self.host.login(usage_place, customer_number)
+        auth = await self.host.get_session_token(email, password)
         await self.host.logout()
         return auth
 
@@ -47,9 +47,9 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     Data has the keys from STEP_USER_DATA_SCHEMA with values provided by the user.
     """
 
-    hub = PlaceholderHub(data[CONF_USAGE_PLACE], data[CONF_CUSTOMER_NUMBER])
+    hub = PlaceholderHub(data[CONF_EMAIL], data[CONF_PASSWORD])
 
-    if not await hub.authenticate(data[CONF_USAGE_PLACE], data[CONF_CUSTOMER_NUMBER]):
+    if not await hub.authenticate(data[CONF_EMAIL], data[CONF_PASSWORD]):
         raise InvalidAuth
 
     # If you cannot connect:

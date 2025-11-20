@@ -13,7 +13,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.components.sensor import SensorStateClass, SensorDeviceClass
 from homeassistant.const import UnitOfEnergy, CURRENCY_EURO
-from .const import (SENSOR_TYPES,DOMAIN,CONF_USAGE_PLACE, CONF_CUSTOMER_NUMBER, CONF_MARGINAL_PRICE, CONF_API_KEY)
+from .const import (SENSOR_TYPES,DOMAIN,CONF_EMAIL, CONF_PASSWORD, CONF_MARGINAL_PRICE, CONF_API_KEY)
 from datetime import timedelta
 
 # SCAN_INTERVAL = timedelta(minutes=15)

@@ -148,7 +148,7 @@ class Herrfors:
             await self.session.close()
             self.session = None
 
-    def get_session_token(self):
+    def get_session_token(self,email=None, password=None):
 
         if not os.path.exists(TOKEN_FILE):
             logger.info(f"⚠️ No token file found. {os.path.abspath(TOKEN_FILE)}")
@@ -169,7 +169,11 @@ class Herrfors:
             self.toke_exp= dt
             from decode_token import decrypt_wrapped_token # todo remove comment here when done testing
 
-            created_time, self.session_token = decrypt_wrapped_token(token_data.get('token'),self.email, self.password)
+            if email is None:
+                email = self.email
+            if password is None:
+                password = self.password
+            created_time, self.session_token = decrypt_wrapped_token(token_data.get('token'), email, password)
             session = aiohttp.ClientSession()
             session.cookie_jar.update_cookies({"__Secure-next-auth.session-token": self.session_token})
             self.session = session
