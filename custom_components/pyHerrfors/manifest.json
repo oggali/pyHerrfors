@@ -10,7 +10,7 @@
   "homekit": {},
   "iot_class": "cloud_polling",
   "requirements": [
-    "pandas >= 2.2.3", "entsoe-py == 0.6.16", "duckdb == 1.4.2"
+    "pandas >= 2.2.3", "entsoe-py == 0.7.8", "duckdb"
   ],
   "version": "2025.11.20.01",
   "ssdp": [],
