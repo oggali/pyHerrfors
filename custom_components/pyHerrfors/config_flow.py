@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 import voluptuous as vol
@@ -47,7 +48,10 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     Data has the keys from STEP_USER_DATA_SCHEMA with values provided by the user.
     """
 
-    hub = PlaceholderHub(data[CONF_EMAIL], data[CONF_PASSWORD])
+    hub = PlaceholderHub(data[CONF_EMAIL], data[CONF_PASSWORD],)
+
+    os.environ["TOKEN_FILE"] = hass.config.path("../share/herrfors_token.json")
+    os.environ["DB_FILE"] = hass.config.path("../share/herrfors_data.db")
 
     if not await hub.authenticate(data[CONF_EMAIL], data[CONF_PASSWORD]):
         raise InvalidAuth

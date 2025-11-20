@@ -6,6 +6,7 @@ from homeassistant.core import callback
 from homeassistant.helpers.event import async_track_time_change
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 import datetime
+import os
 import logging
 from .client import Herrfors
 
@@ -21,6 +22,10 @@ class HerrforsDataUpdateCoordinator(DataUpdateCoordinator):
 
     def __init__(self, hass, config_entry):
         """Initialize the data updater."""
+
+        os.environ["TOKEN_FILE"] = hass.config.path("../share/herrfors_token.json")
+        os.environ["DB_FILE"] = hass.config.path("../share/herrfors_data.db")
+
         self.config_entry = config_entry
         self.api = Herrfors(
             email=config_entry.data[CONF_EMAIL],

@@ -15,11 +15,9 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 logger.setLevel(logging.INFO)
 
-BASE_DIR = os.path.dirname(__name__)
-TOKEN_FILE = os.path.join(BASE_DIR, "share", "herrfors_token.json")
 
-DB_FILE = os.path.join(BASE_DIR, "share", "herrfors_data.db")
-
+TOKEN_FILE = os.getenv("TOKEN_FILE","/share/herrfors_token.json")
+DB_FILE = os.getenv("DB_FILE","/share/herrfors_data.db")
 
 def _db_empty():
     if os.path.exists(DB_FILE):
