@@ -1,4 +1,3 @@
 pandas >= 2.2.3
 entsoe-py == 0.7.8
-cmake
-duckdb
+duckdb == 1.3.0
