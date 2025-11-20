@@ -10,6 +10,7 @@ import os
 import json
 import duckdb as dd
 import requests
+from decode_token import decrypt_wrapped_token
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -165,7 +166,6 @@ class Herrfors:
         else:
             self.login_time=token_data.get('token_timestamp')
             self.toke_exp= dt
-            from decode_token import decrypt_wrapped_token # todo remove comment here when done testing
 
             if email is None:
                 email = self.email
