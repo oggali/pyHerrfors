@@ -77,7 +77,7 @@ class HerrforsDataUpdateCoordinator(DataUpdateCoordinator):
         This method will be called automatically during
         coordinator.async_config_entry_first_refresh.
         """
-        self._device = await self.api.login()
+        self._device = await self.api.update_latest_day()
         await self.api.logout()
 
     async def _async_update_data(self,force=False,*_):
