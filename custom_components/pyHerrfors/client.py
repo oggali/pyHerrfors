@@ -454,18 +454,27 @@ class Herrfors:
                     logger.info(f"Update self.latest_day to {latest_day}")
                     self.latest_day = latest_day
 
-                self.year_prices = pd.concat([self.year_prices, month_prices], axis=0)
+                if month_prices is not None:
+                    self.year_prices = pd.concat([self.year_prices, month_prices], axis=0)
+                    month_price_size = len(month_prices)
+                else:
+                    self.year_prices = month_prices
+                    month_price_size = 0
 
                 self.month_consumption=month_df
                 self.month_prices=month_prices
 
-                logger.info(f"Month {self.latest_month} prices df size is {len(month_prices)} and consumption df size is {len(month_df)}")
+                logger.info(f"Month {self.latest_month} prices df size is {month_price_size} and consumption df size is {len(month_df)}")
 
                 await self.calculate_avg_price(consumption=month_df, prices=month_prices, granularity='ME')
 
                 logger.info(
                     f"Month {self.latest_month} Electricity consumption is {self.latest_month_electricity_consumption} kWh"
                     f" Cost is {self.latest_month_electricity_price_euro} € with avg price {self.latest_month_avg_khw_price_with_vat} c/kWh")
+
+                if month_prices is None and self.month_prices is not None:
+                    month_prices = self.month_prices
+                    self.year_prices = pd.concat([self.year_prices, month_prices], axis=0)
 
                 # filter self.latest_day prices and consumption from months dataframes
                 self.latest_day_electricity_prices = month_prices[month_prices['timestamp_tz'].dt.date == self.latest_day]
@@ -839,7 +848,7 @@ class Herrfors:
         """
 
 
-        if consumption is None or prices is None:
+        if consumption is None or prices is None and (granularity =='D' or granularity is None):
             if self.latest_day_electricity_consumption is None or self.latest_day_electricity_prices is None:
                 await asyncio.gather(self.get_consumption(),
                                      self.get_latest_day_prices())
@@ -908,6 +917,8 @@ class Herrfors:
             self.latest_day_avg_price_by_avg_spot = float(grouped['day_avg_price_with_avg_spot'].iloc[0])
             self.latest_day_avg_spot_price_with_vat = float(grouped['prices_cent_vat_avg'].iloc[0])
             self.latest_day_avg_khw_price_with_vat = float(grouped['day_avg_khw_price_with_alv'].iloc[0])
+            if self.latest_day_electricity_prices is None:
+                self.latest_day_electricity_prices = prices
 
         if self.latest_month is not None and granularity == 'ME' and len(grouped) > 0:
             self.latest_month_electricity_consumption = float(grouped['consumption_sum'].iloc[0])
@@ -918,8 +929,11 @@ class Herrfors:
             self.latest_month_avg_price_by_avg_spot = float(grouped['month_avg_price_with_avg_spot'].iloc[0])
             self.latest_month_avg_spot_price_with_vat = float(grouped['prices_cent_vat_avg'].iloc[0])
             self.latest_month_avg_khw_price_with_vat = float(grouped['month_avg_khw_price_with_alv'].iloc[0])
+            if self.month_prices is None:
+                self.month_prices = prices
 
-
+        if granularity == 'YE' and self.year_prices is None:
+            self.year_prices = prices
 
         return price_calculations, grouped
         
