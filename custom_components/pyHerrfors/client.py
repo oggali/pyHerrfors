@@ -81,6 +81,44 @@ def get_all_from_db_as_df(table_name=None):
 
     return con.sql(f"SELECT * FROM {table_name}").to_df()
 
+def add_vat_to_prices(prices):
+
+    # if prices is already pandas df then skip first ones
+    if isinstance(prices, pd.DataFrame):
+        prices_df=prices
+        prices_df['datetime'] = prices['timestamp_tz']
+        prices_df['prices_cent'] = prices_df['prices']
+        prices_df['prices'] = prices_df['prices'] * 10
+
+        #reorder column order to 'datetime', 'prices', 'prices_cent'
+        prices_df = prices_df[['datetime', 'prices', 'prices_cent']]
+
+    else:
+        prices_df = prices.to_frame(name='prices')
+        prices_df = prices_df.reset_index().rename(columns={'index': 'datetime'})
+        prices_df['prices_cent'] = prices_df['prices'] / 10
+
+    normal_vat = 0.255
+    earlier_normal_vat = 0.24
+    discount_vat = 0.1
+    discount_time_start = '2022-12-1'
+    discount_time_end = '2023-4-30'
+    new_normal_vat_start = '2024-09-1'
+
+    prices_df['vat'] = prices_df['datetime'].apply(
+        lambda x: earlier_normal_vat if x < pd.Timestamp(discount_time_start, tz='EET')
+                                        or (pd.Timestamp(discount_time_end, tz='EET') < x < pd.Timestamp(
+            new_normal_vat_start, tz='EET'))
+        else discount_vat if x < pd.Timestamp(new_normal_vat_start, tz='EET') else normal_vat)
+
+    prices_df['prices_cent_vat'] = prices_df['prices_cent'] * (1 + prices_df['vat'])
+
+    prices_df['timestamp_tz'] = prices_df['datetime']
+
+    prices_df['date'] = prices_df['timestamp_tz'].apply(lambda x: x.tz_convert('EET').date())
+
+    return prices_df
+
 class Herrfors:
 
     def __init__(self, email, password, apikey=None, marginal_price=None):
@@ -800,6 +838,7 @@ class Herrfors:
         :rtype: tuple[DataFrame, DataFrame]
         """
 
+
         if consumption is None or prices is None:
             if self.latest_day_electricity_consumption is None or self.latest_day_electricity_prices is None:
                 await asyncio.gather(self.get_consumption(),
@@ -807,6 +846,18 @@ class Herrfors:
             granularity='D'
             consumption = self.latest_day_electricity_consumption
             prices = self.latest_day_electricity_prices
+
+        if consumption is not None and prices is None:
+            logger.info(f"Prices not given, get prices from consumption dataframe")
+
+            # take only 'price', 'timestamp_tz' columns from consumption df
+            prices_ = consumption[['price', 'timestamp_tz']]
+
+            #rename price to prices
+            prices_.columns = ['prices', 'timestamp_tz']
+
+            prices=add_vat_to_prices(prices_)
+
 
         if consumption is None:
             logger.info(f"Can't do electricity calculations no consumption data available ")
@@ -926,7 +977,7 @@ class Herrfors:
 
 
         country_code = 'FI'
-        def query_entsoe_client(apikey, start, end, resolution):
+        def query_entsoe_client(apikey, start, end, resolution=None):
             client = EntsoePandasClient(api_key=apikey,
                                         # Optional parameters:
                                         retry_count=5,
@@ -951,7 +1002,17 @@ class Herrfors:
 
             logger.info(f" Get prices between {start} and {end}")
 
-            return client.query_day_ahead_prices(country_code, start=start, end=end, resolution=f"{resolution}min")
+            if resolution is not None:
+                resolution_ = f"{resolution}min"
+            else:
+                resolution_ = resolution
+
+            try:
+                entsoe_prices = client.query_day_ahead_prices(country_code, start=start, end=end, resolution=resolution_)
+            except Exception as e:
+                logger.warning(f"Error fetching prices: {e}")
+                entsoe_prices = pd.DataFrame()
+            return entsoe_prices
 
         loop = asyncio.get_running_loop()
         prices = await loop.run_in_executor(None, functools.partial(query_entsoe_client,
@@ -960,29 +1021,9 @@ class Herrfors:
 
         # prices = client.query_day_ahead_prices(country_code, start=start, end=end)
         if not prices.empty:
-            prices_df = prices.to_frame(name='prices')
-            prices_df = prices_df.reset_index().rename(columns={'index': 'datetime'})
-            prices_df['prices_cent'] = prices_df['prices'] / 10
 
-            normal_vat = 0.255
-            earlier_normal_vat = 0.24
-            discount_vat = 0.1
-            discount_time_start = '2022-12-1'
-            discount_time_end = '2023-4-30'
-            new_normal_vat_start = '2024-09-1'
-
-            prices_df['vat'] = prices_df['datetime'].apply(
-                lambda x: earlier_normal_vat if x < pd.Timestamp(discount_time_start, tz='EET')
-                                        or (pd.Timestamp(discount_time_end, tz='EET') < x < pd.Timestamp(new_normal_vat_start, tz='EET'))
-                                        else discount_vat if x < pd.Timestamp(new_normal_vat_start, tz='EET') else normal_vat)
-
-            prices_df['prices_cent_vat'] = prices_df['prices_cent'] * (1 + prices_df['vat'])
-
-            prices_df['timestamp_tz'] = prices_df['datetime']
-
-            prices_df['date'] = prices_df['timestamp_tz'].apply(lambda x: x.tz_convert('EET').date())
-
-            return prices_df
+            return add_vat_to_prices(prices)
         else:
             logger.info(f"No prices found for {start} and {end}, return was {prices}")
+            return None
 
