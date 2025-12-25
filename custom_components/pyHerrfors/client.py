@@ -48,6 +48,15 @@ def _table_not_exists(table_name):
     else:
         return True
 
+def get_table_columns(con, table_name):
+    rows = con.execute("""
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = ?
+        ORDER BY ordinal_position
+    """, [table_name]).fetchall()
+    return [r[0] for r in rows]
+
 def insert_to_db(df_to_insert, table_name, del_key_column=None):
 
     con = dd.connect(DB_FILE)
@@ -64,11 +73,20 @@ def insert_to_db(df_to_insert, table_name, del_key_column=None):
         DELETE FROM {table_name}
         where {del_key_column} in ( select {del_key_column} from df_to_insert group by {del_key_column})
         """)
+    logger.info(f'insert data to table  {table_name}')
+
+    cols = get_table_columns(con, table_name)
+
+    common = [c for c in cols if c in df_to_insert.columns]
+
+    col_list = ", ".join(common)
 
     # then insert
     con.sql(f'''
             INSERT INTO {table_name}
-            SELECT * FROM df_to_insert
+            SELECT
+            {col_list}
+            FROM df_to_insert
     ''')
 
     con.execute("CHECKPOINT")
