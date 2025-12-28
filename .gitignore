@@ -17,3 +17,4 @@
 /Dockerfile
 /testing.py
 /custom_components/pyHerrfors/testing/
+hassio_core/.*.
