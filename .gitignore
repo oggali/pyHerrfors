@@ -18,3 +18,46 @@
 /testing.py
 /custom_components/pyHerrfors/testing/
 hassio_core/.*.
+
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+.env
+
+# --- Testing & coverage ---
+.pytest_cache/
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# --- IDEs & editors ---
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# --- OS files ---
+.DS_Store
+Thumbs.db
+
+# --- Logs & temp files ---
+*.log
+*.tmp
+
+custom_components/pyHerrfors/share/herrfors_token.json
+custom_components/pyHerrfors/share/herrfors_data.db
+custom_components/pyHerrfors/testing.py
