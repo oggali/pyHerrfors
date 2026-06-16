@@ -1,10 +1,21 @@
+# Release workflow (Option C: manifest.json is the single source of truth).
+#
+# Instead of creating tags by hand, you just bump the "version" field in
+# custom_components/pyHerrfors/manifest.json and push to master. This workflow
+# then reads that version, creates the matching git tag (e.g. v2026.06.16),
+# pushes it, and publishes a GitHub Release for it.
 name: Release
 
+# Run only when manifest.json changes on master, so a normal code push that
+# doesn't touch the version won't trigger a release.
 on:
   push:
-    tags:
-      - 'v*'   # runs for v1.0.0, v2.3.4, etc.
+    branches:
+      - master
+    paths:
+      - "custom_components/pyHerrfors/manifest.json"
 
+# The GITHUB_TOKEN needs write access to push the tag and create the release.
 permissions:
   contents: write
 
@@ -13,18 +24,47 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # Check out the full history (fetch-depth: 0) so we can read existing
+      # tags and push a new one.
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-#      - name: Run tests
-#        run: |
-#          npm install
-#          npm test
-#
-#      - name: Build
-#        run: npm run build
+      # Read the "version" value from manifest.json and expose it as outputs:
+      #   - version: the raw value, e.g. 2026.06.16
+      #   - tag:     the tag we want, e.g. v2026.06.16
+      - name: Read version from manifest.json
+        id: manifest
+        run: |
+          version=$(jq -r '.version' custom_components/pyHerrfors/manifest.json)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
 
+      # If the tag already exists (e.g. the workflow re-ran, or the version
+      # wasn't actually bumped), skip the rest so we don't fail or duplicate.
+      - name: Check if tag already exists
+        id: check
+        run: |
+          if git rev-parse "refs/tags/${{ steps.manifest.outputs.tag }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Tag ${{ steps.manifest.outputs.tag }} already exists, skipping release."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Create the tag from the current commit and push it to origin.
+      - name: Create and push tag
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          git tag "${{ steps.manifest.outputs.tag }}"
+          git push origin "${{ steps.manifest.outputs.tag }}"
+
+      # Publish the GitHub Release for the tag, with auto-generated notes.
       - name: Create GitHub Release
+        if: steps.check.outputs.exists == 'false'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.manifest.outputs.tag }}
+          name: ${{ steps.manifest.outputs.tag }}
           generate_release_notes: true
