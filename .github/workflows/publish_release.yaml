@@ -5,6 +5,9 @@ on:
     tags:
       - 'v*'   # runs for v1.0.0, v2.3.4, etc.
 
+permissions:
+  contents: write
+
 jobs:
   release:
     runs-on: ubuntu-latest
