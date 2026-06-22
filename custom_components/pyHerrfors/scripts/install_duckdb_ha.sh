@@ -14,9 +14,9 @@ if [ "$PY_MINOR" -lt 14 ]; then
     python3 -m pip install --no-cache-dir "duckdb==1.3.2"
 else
     echo "Installing duckdb>=1.4.2 (compiling from source, may take 20-40 minutes)..."
-    apk add --no-cache cmake g++ gcc linux-headers musl-dev python3-dev
+    apk add --no-cache cmake samurai g++ gcc linux-headers musl-dev python3-dev
     python3 -m pip install --no-cache-dir "duckdb>=1.4.2"
-    apk del cmake g++ gcc linux-headers musl-dev python3-dev || true
+    apk del cmake samurai g++ gcc linux-headers musl-dev python3-dev || true
 fi
 
 python3 -c "import duckdb; print('duckdb', duckdb.__version__, 'OK')"
