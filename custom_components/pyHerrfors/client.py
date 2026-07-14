@@ -13,7 +13,9 @@ from .const import (
     RESOLUTION_CUTOFF_DATE,
     days_later_for_latest,
 )
+from .dates import cached_dates, date_range, filter_date_range, upsert_by_date
 from .db import get_all_from_db_as_df, insert_to_db
+from .models import HerrforsSnapshot, PeriodSummary
 from .pricing import add_vat_to_prices, apply_price_calculations
 from .session import HerrforsSession
 
@@ -76,6 +78,7 @@ class Herrfors:
         self.month_group_calculations = None
         self.day_group_calculations = None
         self.year_group_calculations = None
+        self.snapshot = HerrforsSnapshot()
 
     @property
     def session(self):
@@ -336,73 +339,23 @@ class Herrfors:
 
         if start_day is None:
             import calendar
-            res = calendar.monthrange(int(month.split('/')[0]),month=int(month.split('/')[1]))
-            start_day = datetime.date(year=int(month.split('/')[0]),month=int(month.split('/')[1]),day=1)
-            last_day = datetime.date(year=int(month.split('/')[0]),month=int(month.split('/')[1]),day=res[1])
+            year, month_num = map(int, month.split("/"))
+            res = calendar.monthrange(year, month=month_num)
+            start_day = datetime.date(year=year, month=month_num, day=1)
+            last_day = datetime.date(year=year, month=month_num, day=res[1])
 
-        # check if start_day is found from self.year_consumption
-        month_df = pd.DataFrame(columns=['timestamp_tz', 'consumption'])
-        month_df_missing = pd.DataFrame(columns=['timestamp_tz', 'consumption'])
-        if self.year_consumption is not None:
-            if start_day not in  self.year_consumption['timestamp_tz'].dt.date.values or self.year_consumption.empty:
-                # loop dates between start_day to self._get_latest_day() store results to pd df
-                await self.get_specific_day_consumption(start_day)
-                if not self.single_day_consumption.empty:
-                    month_df_missing = self.single_day_consumption
-                    if self.year_consumption is None:
-                        self.year_consumption = month_df_missing
-                    else:
-                        self.year_consumption = pd.concat([self.year_consumption, month_df_missing], axis=0)
-                    month_df = month_df_missing
-            else:
-                month_df = self.year_consumption[self.year_consumption['timestamp_tz'].dt.date.values == start_day]
-        else:
-            await self.get_specific_day_consumption(start_day)
-            if not self.single_day_consumption.empty:
-                month_df_missing = self.single_day_consumption
-                if self.year_consumption is None:
-                    self.year_consumption = month_df_missing
-                else:
-                    self.year_consumption = pd.concat([self.year_consumption, month_df_missing], axis=0)
-                month_df = month_df_missing
-        fetch_day = start_day + datetime.timedelta(days=1)
+        known_dates = cached_dates(self.year_consumption)
+        missing_days = [
+            day for day in date_range(start_day, last_day) if day not in known_dates
+        ]
 
-        fetch_tasks = []
-        while fetch_day <= last_day:
-            if self.year_consumption is not None:
-                if fetch_day not in self.year_consumption['timestamp_tz'].dt.date.values or self.year_consumption.empty:
-                    fetch_tasks.append(self.get_specific_day_consumption(fetch_day))
-                    # month_df = pd.concat([month_df, self.single_day_consumption], axis=0)
-                    # self.year_consumption = pd.concat([self.year_consumption, month_df], axis=0)
-                else:
-                    month_df = pd.concat(
-                        [month_df, self.year_consumption[self.year_consumption['timestamp_tz'].dt.date.values == fetch_day]],
-                        axis=0)
-            else:
-                fetch_tasks.append(self.get_specific_day_consumption(fetch_day))
-                # month_df = pd.concat([month_df, self.single_day_consumption], axis=0)
-                # self.year_consumption = pd.concat([self.year_consumption, month_df], axis=0)
-            fetch_day = fetch_day + datetime.timedelta(days=1)
-        if fetch_tasks:
-            results = await asyncio.gather(*fetch_tasks)
-            # await self.logout()
-            if results is not None:
-                # Filter out empty DataFrames
-                filtered_results = [df for df in results if not df.empty]
-                if filtered_results:
-                    month_df_missing = pd.concat(filtered_results, ignore_index=True)
-            if not month_df.empty and not month_df_missing.empty:
-                month_df = pd.concat([month_df, month_df_missing], axis=0)
-            else:
-                if not month_df_missing.empty:
-                    month_df = month_df_missing
-            if not month_df_missing.empty:
-                if self.year_consumption is None:
-                    self.year_consumption = month_df_missing
-                else:
-                    self.year_consumption = pd.concat([self.year_consumption, month_df_missing], axis=0)
+        if missing_days:
+            results = await asyncio.gather(
+                *(self.get_specific_day_consumption(day) for day in missing_days)
+            )
+            self.year_consumption = upsert_by_date(self.year_consumption, results)
 
-        return month_df
+        return filter_date_range(self.year_consumption, start_day, last_day)
 
 
     async def get_specific_day_consumption(self, date):
@@ -640,6 +593,45 @@ class Herrfors:
         return grouped
 
 
+    def refresh_snapshot(self):
+        day = None
+        if self.latest_day_electricity_consumption_sum is not None:
+            day = PeriodSummary(
+                label=self.latest_day,
+                consumption_kwh=self.latest_day_electricity_consumption_sum,
+                price_euro=self.latest_day_electricity_price_euro,
+                avg_kwh_price_vat=self.latest_day_avg_khw_price_with_vat,
+                optimization_savings_eur=self.latest_day_optimization_savings_eur,
+                optimization_efficiency=self.latest_day_optimization_efficiency,
+                avg_price_with_vat=self.latest_day_avg_price_with_vat,
+                avg_price_by_avg_spot=self.latest_day_avg_price_by_avg_spot,
+                avg_spot_price_with_vat=self.latest_day_avg_spot_price_with_vat,
+            )
+
+        month = None
+        if self.latest_month_electricity_consumption is not None:
+            month = PeriodSummary(
+                label=self.latest_month,
+                consumption_kwh=self.latest_month_electricity_consumption,
+                price_euro=self.latest_month_electricity_price_euro,
+                avg_kwh_price_vat=self.latest_month_avg_khw_price_with_vat,
+                optimization_savings_eur=self.latest_month_optimization_savings_eur,
+                optimization_efficiency=self.latest_month_optimization_efficiency,
+                avg_price_with_vat=self.latest_month_avg_price_with_vat,
+                avg_price_by_avg_spot=self.latest_month_avg_price_by_avg_spot,
+                avg_spot_price_with_vat=self.latest_month_avg_spot_price_with_vat,
+            )
+
+        self.snapshot = HerrforsSnapshot(
+            latest_day=self.latest_day,
+            latest_month=self.latest_month,
+            day=day,
+            month=month,
+            day_group_calculations=self.day_group_calculations,
+            month_group_calculations=self.month_group_calculations,
+            latest_day_detail=self.latest_day_electricity_price_consumption_calculations,
+        )
+
     async def calculate_avg_price(self, consumption=None, prices=None, granularity=None):
 
         """
@@ -732,6 +724,7 @@ class Herrfors:
         if granularity == 'YE' and self.year_prices is None:
             self.year_prices = prices
 
+        self.refresh_snapshot()
         return price_calculations, grouped
         
 
