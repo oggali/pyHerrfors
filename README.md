@@ -165,6 +165,26 @@ backing off to about once per hour otherwise.
 
 ## Development & testing
 
+### Auto pull requests
+
+Pushes to `feature/**` or `refactor/**` branches automatically open or update a PR via
+[`.github/workflows/auto-pr.yml`](.github/workflows/auto-pr.yml):
+
+| Branch pattern | PR base |
+| --- | --- |
+| `feature/*` | `master` |
+| `refactor/*` (other) | `master` |
+| `refactor/client-pr1-*` | `master` |
+| `refactor/client-pr{N}-*` (N > 1) | matching `refactor/client-pr{N-1}-*` branch |
+
+Override the base with `[pr-base=branch-name]` in a commit message. After the workflow
+is on `master`, re-trigger existing branches with an empty commit:
+
+```sh
+git commit --allow-empty -m "trigger auto-pr"
+git push
+```
+
 A [`compose.yml`](compose.yml) is provided to run Home Assistant locally with this
 integration mounted live:
 
