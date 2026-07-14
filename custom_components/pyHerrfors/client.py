@@ -1,144 +1,27 @@
 #custom_components/pyHerrfors/client.py
 import datetime
 import pandas as pd
-import aiohttp
 import asyncio
 from entsoe import EntsoePandasClient
 import functools
 import logging
-import os
 import json
-import duckdb as dd
-from .decode_token import decrypt_wrapped_token
+
+from .const import (
+    CO_ID,
+    PORTAL_READINGS_URL,
+    RESOLUTION_CUTOFF_DATE,
+    days_later_for_latest,
+)
+from .db import get_all_from_db_as_df, insert_to_db
+from .pricing import add_vat_to_prices, apply_price_calculations
+from .session import HerrforsSession
 
 logger = logging.getLogger(__name__)
 
-TOKEN_FILE = os.getenv("TOKEN_FILE","/share/herrfors_token.json")
-DB_FILE = os.getenv("DB_FILE","/share/herrfors_data.db")
-LATEST_DAY_CUTOFF_HOUR = 6
+# Re-export for callers that imported from client
+__all__ = ["Herrfors", "get_all_from_db_as_df"]
 
-
-def _days_later_for_latest(now=None):
-    if now is None:
-        now = datetime.datetime.now()
-    return 2 if now.hour < LATEST_DAY_CUTOFF_HOUR else 1
-
-def _db_empty():
-    if os.path.exists(DB_FILE):
-        con = dd.connect(DB_FILE)
-        db_tables = con.sql('SELECT * FROM duckdb_tables()')
-        if len(db_tables['table_name'].fetchall()) == 0:
-            con.close()
-            return True
-        else:
-            con.close()
-            return False
-
-    if not os.path.exists(DB_FILE):
-        return True
-
-def _table_not_exists(table_name):
-    if os.path.exists(DB_FILE):
-        con = dd.connect(DB_FILE)
-        db_tables = con.sql(f"SELECT * FROM information_schema.tables where table_name='{table_name}'")
-
-        if len(db_tables) == 0:
-            con.close()
-            return True
-        else:
-            con.close()
-            return False
-    else:
-        return True
-
-def get_table_columns(con, table_name):
-    rows = con.execute("""
-        SELECT column_name
-        FROM information_schema.columns
-        WHERE table_name = ?
-        ORDER BY ordinal_position
-    """, [table_name]).fetchall()
-    return [r[0] for r in rows]
-
-def insert_to_db(df_to_insert, table_name, del_key_column=None):
-
-    con = dd.connect(DB_FILE)
-
-    if _table_not_exists(table_name):
-        con.sql(f'''        
-                CREATE TABLE {table_name} as
-                SELECT * FROM df_to_insert
-                ''')
-
-    if del_key_column is not None:
-        # first delete every row where date is same as in df_to_insert
-        con.sql(f"""
-        DELETE FROM {table_name}
-        where {del_key_column} in ( select {del_key_column} from df_to_insert group by {del_key_column})
-        """)
-    logger.info(f'insert data to table  {table_name}')
-
-    cols = get_table_columns(con, table_name)
-
-    common = [c for c in cols if c in df_to_insert.columns]
-
-    col_list = ", ".join(common)
-
-    # then insert
-    con.sql(f'''
-            INSERT INTO {table_name}
-            SELECT
-            {col_list}
-            FROM df_to_insert
-    ''')
-
-    con.execute("CHECKPOINT")
-    con.close()
-
-def get_all_from_db_as_df(table_name=None):
-    con = dd.connect(DB_FILE)
-    if table_name is None:
-        table_name = "price_calculations_all"
-
-    return con.sql(f"SELECT * FROM {table_name}").to_df()
-
-def add_vat_to_prices(prices):
-
-    # if prices is already pandas df then skip first ones
-    if isinstance(prices, pd.DataFrame):
-        prices_df=prices
-        prices_df['datetime'] = prices['timestamp_tz']
-        prices_df['prices_cent'] = prices_df['prices']
-        prices_df['prices'] = prices_df['prices'] * 10
-
-        #reorder column order to 'datetime', 'prices', 'prices_cent'
-        prices_df = prices_df[['datetime', 'prices', 'prices_cent']]
-
-    else:
-        prices_df = prices.to_frame(name='prices')
-        prices_df = prices_df.reset_index().rename(columns={'index': 'datetime'})
-        prices_df['prices_cent'] = prices_df['prices'] / 10
-
-    normal_vat = 0.255
-    earlier_normal_vat = 0.24
-    discount_vat = 0.1
-    discount_time_start = '2022-12-1'
-    discount_time_end = '2023-4-30'
-    new_normal_vat_start = '2024-09-1'
-
-    prices_df['vat'] = prices_df['datetime'].apply(
-        lambda x: earlier_normal_vat if x < pd.Timestamp(discount_time_start, tz='EET')
-                                        or (pd.Timestamp(discount_time_end, tz='EET') < x < pd.Timestamp(
-            new_normal_vat_start, tz='EET'))
-        else discount_vat if x < pd.Timestamp(new_normal_vat_start, tz='EET') else normal_vat)
-
-    prices_df['prices_cent_vat'] = prices_df['prices_cent'] * (1 + prices_df['vat'])
-
-    prices_df['timestamp_tz'] = prices_df['datetime']
-
-    prices_df['date'] = prices_df['timestamp_tz'].apply(lambda x: x.tz_convert('EET').date())
-
-    return prices_df
 
 class Herrfors:
 
@@ -149,11 +32,7 @@ class Herrfors:
         self.single_day_consumption = None
         self.email = email
         self.password = password
-        self.session = None
-        self.session_token = None
-        self.login_time = None
-        self.toke_exp = None
-        self.headers = None
+        self._portal_session = HerrforsSession(email, password)
         self.time_step = None
         self.apikey = apikey
         self.marginal_price = marginal_price
@@ -198,69 +77,34 @@ class Herrfors:
         self.day_group_calculations = None
         self.year_group_calculations = None
 
+    @property
+    def session(self):
+        return self._portal_session.session
+
+    @property
+    def session_token(self):
+        return self._portal_session.session_token
+
+    @property
+    def login_time(self):
+        return self._portal_session.login_time
+
+    @property
+    def toke_exp(self):
+        return self._portal_session.token_exp
+
+    @property
+    def headers(self):
+        return self._portal_session.headers
+
     async def __aexit__(self, *err):
-        if self.session is not None:
-            await self.session.close()
-            self.session = None
+        await self._portal_session.close()
 
-    def _schedule_session_close(self, session):
-        try:
-            asyncio.get_running_loop().create_task(session.close())
-        except RuntimeError:
-            logger.warning("Could not schedule aiohttp session close; no running event loop")
-
-    def get_session_token(self,email=None, password=None):
-
-        if not os.path.exists(TOKEN_FILE):
-            logger.info(f"⚠️ No token file found. {os.path.abspath(TOKEN_FILE)}")
-            return False
-
-        with open(TOKEN_FILE, "r") as f:
-            token_data = json.load(f)
-
-        exp = token_data.get("expires")
-        logger.info(f"Token expires in {datetime.datetime.fromisoformat(exp.replace('Z', '+00:00'))}")
-        if not exp:
-            return False
-        dt = datetime.datetime.fromisoformat(exp.replace("Z", "+00:00"))
-        if not datetime.datetime.now(datetime.timezone.utc) < dt:
-            return False
-        else:
-            self.login_time=token_data.get('token_timestamp')
-            self.toke_exp= dt
-
-            if email is None:
-                email = self.email
-            if password is None:
-                password = self.password
-            created_time, self.session_token = decrypt_wrapped_token(token_data.get('token'), email, password)
-            if self.session is not None:
-                old_session = self.session
-                self.session = None
-                self._schedule_session_close(old_session)
-            session = aiohttp.ClientSession()
-            session.cookie_jar.update_cookies({"__Secure-next-auth.session-token": self.session_token})
-            self.session = session
-
-            self.headers = {
-                "x-client-id": "6212c91e-f646-4a74-b3ce-38a4a3df2d9d",
-                "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-                "accept": "application/json, text/plain, */*",
-                "referer": "https://portal.herrfors.fi/fi-FI/charts",
-            }
-            return True
+    def get_session_token(self, email=None, password=None):
+        return self._portal_session.get_session_token(email, password)
 
     async def logout(self):
-        """
-        Closes the session by logging out
-        :return: the response object
-        """
-        #todo check if logout is needed to implement
-
-        # r = None
-        # if self.session is not None or self.session:
-        #     r = await self.session.get("https://meter.katterno.fi/index.php?logout&amp;lang=FIN")
-        await self.__aexit__()
+        await self._portal_session.close()
         return
 
     def _get_latest_day(self, update_self=True):
@@ -285,7 +129,7 @@ class Herrfors:
         :return: None
         """
 
-        self._days_later = _days_later_for_latest()
+        self._days_later = days_later_for_latest()
 
 
         # latest day check
@@ -308,14 +152,7 @@ class Herrfors:
         return latest_day
 
     def _check_session(self):
-
-        if self.session is None:
-            return self.get_session_token()
-        elif (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)) > self.toke_exp:
-            return self.get_session_token()
-        else:
-            logger.info("Session is still valid, so we don't need to get a new one")
-            return True
+        return self._portal_session.check_session()
 
 
     async def update_latest_day(self):
@@ -618,7 +455,7 @@ class Herrfors:
                 granularity = 'Y'
             logger.info(f"Getting consumption for {params.get('date')}")
 
-        if int(params.get('date').replace('-',''))<20251001:
+        if int(params.get('date').replace('-','')) < RESOLUTION_CUTOFF_DATE:
             time_step = 60
             self.resolution = 60
         else:
@@ -636,7 +473,7 @@ class Herrfors:
             params['previous_date'] = previous_day.strftime('%Y-%m-%d')
 
         requests_params = {
-            "coId": "60754370",
+            "coId": CO_ID,
             "from": f"{params.get('previous_date')}T22:00:00.000Z",
             "to": f"{params.get('date')}T22:00:00.000Z",
             "price": "true",
@@ -644,7 +481,7 @@ class Herrfors:
             "timeStep": f"{time_step}",
         }
 
-        url = "https://portal.herrfors.fi/api/charts/readings"
+        url = PORTAL_READINGS_URL
 
         logger.info(f"Parameters to request: {requests_params}")
 
@@ -857,16 +694,9 @@ class Herrfors:
         # combine_df['timestamp_tz'] = combine_df['datetime']
 
         price_calculations = combine_df
-        fixed_marginal_price = self.marginal_price or 0
-
-        price_calculations['price'] = price_calculations['consumption'] * price_calculations['prices_cent']
-        price_calculations['price_euro'] = price_calculations['price'] / 100
-        price_calculations['price_marginal_alv'] = price_calculations['prices_cent_vat'] + fixed_marginal_price
-        price_calculations['price_vat'] = price_calculations['consumption'] * price_calculations['prices_cent_vat']
-        price_calculations['price_marg_alv'] = price_calculations['consumption'] * (
-            price_calculations['prices_cent_vat'] + fixed_marginal_price
+        price_calculations = apply_price_calculations(
+            price_calculations, marginal_price=self.marginal_price
         )
-        price_calculations['price_marg_alv_euro'] = price_calculations['price_marg_alv'] / 100
 
         # insert day price calc to dd
         if granularity != 'YE':
@@ -966,7 +796,7 @@ class Herrfors:
                                         timeout=380)
 
             if start is None:
-                days_later = _days_later_for_latest()
+                days_later = days_later_for_latest()
                 start = pd.Timestamp.now(tz='EET') - pd.Timedelta(days=days_later)
                 start = start.normalize()
                 end = start + pd.Timedelta(days=1)

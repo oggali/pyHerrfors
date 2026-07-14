@@ -1,9 +1,41 @@
 """Constants for the pyherrfors integration."""
 # custom_components/pyHerrfors/const.py
-from datetime import timedelta
+import datetime
 
-# DEFAULT_SCAN_INTERVAL = timedelta(hours=1)
 DOMAIN = "pyherrfors"
+
+# Portal API
+PORTAL_BASE_URL = "https://portal.herrfors.fi"
+PORTAL_READINGS_URL = f"{PORTAL_BASE_URL}/api/charts/readings"
+PORTAL_CHARTS_REFERER = f"{PORTAL_BASE_URL}/fi-FI/charts"
+PORTAL_CLIENT_ID = "6212c91e-f646-4a74-b3ce-38a4a3df2d9d"
+CO_ID = "60754370"
+
+# Data resolution cutoff (YYYYMMDD) — 60-min before, 15-min after
+RESOLUTION_CUTOFF_DATE = 20251001
+
+# Latest available consumption day
+LATEST_DAY_CUTOFF_HOUR = 6
+
+# Finnish VAT schedule
+NORMAL_VAT = 0.255
+EARLIER_NORMAL_VAT = 0.24
+DISCOUNT_VAT = 0.1
+DISCOUNT_VAT_START = "2022-12-1"
+DISCOUNT_VAT_END = "2023-4-30"
+NEW_NORMAL_VAT_START = "2024-09-1"
+
+# Storage paths (overridable via env in db.py / session.py)
+DEFAULT_TOKEN_FILE = "/share/herrfors_token.json"
+DEFAULT_DB_FILE = "/share/herrfors_data.db"
+
+
+def days_later_for_latest(now=None):
+    if now is None:
+        now = datetime.datetime.now()
+    return 2 if now.hour < LATEST_DAY_CUTOFF_HOUR else 1
+
+
 SENSOR_TYPES = {
     "latest_day": "Latest Day",
     "latest_day_electricity_consumption_sum": "Latest Day Electricity Consumption sum",
