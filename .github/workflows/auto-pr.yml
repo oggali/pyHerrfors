@@ -1,28 +1,19 @@
 # Open or update a pull request when feature/refactor branches are pushed.
 #
-# All PRs target master. For stacked refactors (client-pr1 → pr2 → …), merge in
-# numeric order; each PR body notes the suggested merge order.
+# Base branch rules (no per-branch config file):
+#   feature/*                         -> master
+#   refactor/* (generic)              -> master
+#   refactor/client-pr{N}-*  (N > 1)  -> first remote branch matching refactor/client-pr{N-1}-*
+#   refactor/client-pr1-*             -> master
 #
-# Important: the workflow file must exist on the branch being pushed (merge master
-# or copy this file onto older branches once).
-#
-# One-time repo setup: Settings → Actions → General → Workflow permissions →
-# "Allow GitHub Actions to create and approve pull requests".
-#
-# Override base: [pr-base=branch-name] in a commit message (rare).
+# Override: include [pr-base=branch-name] in the latest commit message.
 name: Auto PR
 
 on:
   push:
     branches:
-      - "feature/*"
-      - "refactor/*"
-  workflow_dispatch:
-    inputs:
-      branch:
-        description: "Branch to open or update a PR for"
-        required: true
-        type: string
+      - "feature/**"
+      - "refactor/**"
 
 permissions:
   contents: read
@@ -36,8 +27,8 @@ jobs:
         id: meta
         uses: actions/github-script@v7
         env:
-          HEAD_BRANCH: ${{ github.event.inputs.branch || github.ref_name }}
-          COMMIT_MESSAGE: ${{ github.event.head_commit.message || '' }}
+          HEAD_BRANCH: ${{ github.ref_name }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         with:
           script: |
             const head = process.env.HEAD_BRANCH;
@@ -56,24 +47,42 @@ jobs:
               return match ? match[1] : null;
             }
 
-            function mergeOrderNote(branch) {
+            async function resolveStackBase(branch) {
               const match = branch.match(/^refactor\/client-pr(\d+)-/);
               if (!match) {
-                return "";
+                return "master";
               }
+
               const n = Number(match[1]);
               if (n <= 1) {
-                return "Part of the client.py refactor stack. Merge this PR first.";
+                return "master";
               }
-              return (
-                `Part of the client.py refactor stack. Merge **client-pr${n - 1}** ` +
-                `(or its PR) into master before this one.`
-              );
+
+              const prevPrefix = `refactor/client-pr${n - 1}-`;
+              const branches = [];
+              let page = 1;
+
+              while (true) {
+                const { data } = await github.rest.repos.listBranches({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  per_page: 100,
+                  page,
+                });
+                branches.push(...data.map((item) => item.name));
+                if (data.length < 100) {
+                  break;
+                }
+                page += 1;
+              }
+
+              const parent = branches.find((name) => name.startsWith(prevPrefix));
+              return parent || "master";
             }
 
-            const base = overrideBase(commitMessage) || "master";
+            const override = overrideBase(commitMessage);
+            const base = override || (await resolveStackBase(head));
             const title = titleFromBranch(head);
-            const mergeNote = mergeOrderNote(head);
 
             if (head === base) {
               core.setFailed(`Head and base are both ${head}; refusing to open a PR.`);
@@ -82,77 +91,52 @@ jobs:
 
             core.setOutput("base", base);
             core.setOutput("title", title);
-            core.setOutput("merge_note", mergeNote);
 
       - name: Create or update pull request
         uses: actions/github-script@v7
-        env:
-          HEAD_BRANCH: ${{ github.event.inputs.branch || github.ref_name }}
         with:
           script: |
-            const head = process.env.HEAD_BRANCH;
+            const head = context.ref.replace("refs/heads/", "");
             const base = `${{ steps.meta.outputs.base }}`;
             const title = `${{ steps.meta.outputs.title }}`;
-            const mergeNote = `${{ steps.meta.outputs.merge_note }}`;
 
-            const bodyParts = [
+            const body = [
               "Auto-opened by [.github/workflows/auto-pr.yml](.github/workflows/auto-pr.yml).",
               "",
               `- **Head:** \`${head}\``,
               `- **Base:** \`${base}\``,
-            ];
-
-            if (mergeNote) {
-              bodyParts.push("", mergeNote);
-            }
-
-            bodyParts.push(
               "",
-              "Re-run: push again or use **Actions → Auto PR → Run workflow**.",
-              "Override base: `[pr-base=branch-name]` in a commit message."
-            );
+              "Re-run by pushing again (e.g. `git commit --allow-empty -m \"trigger auto-pr\" && git push`).",
+              "Override base branch with `[pr-base=your-base-branch]` in a commit message.",
+            ].join("\n");
 
-            const body = bodyParts.join("\n");
+            const { data: existing } = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              head: `${context.repo.owner}:${head}`,
+              state: "open",
+            });
 
-            const prPermissionHint =
-              "Enable Settings → Actions → General → Workflow permissions → " +
-              '"Allow GitHub Actions to create and approve pull requests".';
-
-            try {
-              const { data: existing } = await github.rest.pulls.list({
+            if (existing.length > 0) {
+              const pull = existing[0];
+              await github.rest.pulls.update({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                head: `${context.repo.owner}:${head}`,
-                state: "open",
-              });
-
-              if (existing.length > 0) {
-                const pull = existing[0];
-                await github.rest.pulls.update({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  pull_number: pull.number,
-                  base,
-                  title,
-                  body,
-                });
-                core.info(`Updated PR #${pull.number}: ${head} -> ${base}`);
-                return;
-              }
-
-              const { data: created } = await github.rest.pulls.create({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                head,
+                pull_number: pull.number,
                 base,
                 title,
                 body,
               });
-              core.info(`Created PR #${created.number}: ${head} -> ${base}`);
-            } catch (error) {
-              if (error?.message?.includes("not permitted to create or approve pull requests")) {
-                core.setFailed(`${error.message}\n\n${prPermissionHint}`);
-                return;
-              }
-              throw error;
+              core.info(`Updated PR #${pull.number}: ${head} -> ${base}`);
+              return;
             }
+
+            const { data: created } = await github.rest.pulls.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              head,
+              base,
+              title,
+              body,
+            });
+            core.info(`Created PR #${created.number}: ${head} -> ${base}`);
