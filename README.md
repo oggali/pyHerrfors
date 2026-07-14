@@ -33,13 +33,24 @@ Herrfors portal  ──(consumption kWh)──┐
 Entso-E API      ──(spot prices €)────┘                                      + DuckDB (/share)
 ```
 
+The integration code is split into focused modules under `custom_components/pyHerrfors/`:
+
+| Module | Role |
+| --- | --- |
+| `client.py` | Orchestrates fetching, caching, and updates |
+| `session.py` | Portal token and aiohttp session lifecycle |
+| `pricing.py` | VAT and electricity price calculations |
+| `db.py` | DuckDB persistence helpers |
+| `dates.py` | Date-range helpers for assembling consumption |
+| `models.py` | `HerrforsSnapshot` dataclass exposed to sensors |
+
 1. A session token for the Herrfors portal is read from `/share/herrfors_token.json`
    and decrypted locally using your e-mail + password (see [Authentication](#authentication)).
 2. Consumption readings are fetched from `portal.herrfors.fi`.
 3. Day-ahead spot prices are fetched from Entso-E for the same period.
 4. The two are merged; VAT, your marginal price, costs and optimization metrics
    are computed, grouped by day / month / year, and written to DuckDB.
-5. Sensors expose the latest day and latest month values.
+5. Sensors expose the latest day and latest month values via a structured `HerrforsSnapshot` (legacy flat attribute names on the client are still populated for compatibility).
 
 ## Requirements
 
@@ -164,6 +175,8 @@ backing off to about once per hour otherwise.
 | `pyherrfors.force_update_current_year` | Recompute the whole current year | `day_level` (optional, also recompute each day) |
 
 ## Development & testing
+
+Module layout: see [How it works](#how-it-works). Sensor values are read from `Herrfors.snapshot` with fallback to legacy client attributes.
 
 A [`compose.yml`](compose.yml) is provided to run Home Assistant locally with this
 integration mounted live:
