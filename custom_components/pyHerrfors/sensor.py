@@ -19,8 +19,6 @@ from datetime import timedelta
 # SCAN_INTERVAL = timedelta(minutes=15)
 
 _LOGGER = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
-_LOGGER.setLevel(logging.INFO)
 
 
 async def async_setup_entry(hass: HomeAssistant,
@@ -101,12 +99,14 @@ class HerrforsSensor(CoordinatorEntity, SensorEntity):
     @property
     def native_value(self):
         """Return the state of the sensor."""
+        snapshot = self.coordinator.snapshot
+        value = snapshot.get_sensor_value(self._sensor_type)
+        if value is not None:
+            return value
         data = self.coordinator.data
-        if data is not None and hasattr(data, "snapshot"):
-            value = data.snapshot.get_sensor_value(self._sensor_type)
-            if value is not None:
-                return value
-        return getattr(data, self._sensor_type, None)
+        if data is not None:
+            return getattr(data, self._sensor_type, None)
+        return None
 
     @property
     def available(self) -> bool:
@@ -137,7 +137,7 @@ class HerrforsSensor(CoordinatorEntity, SensorEntity):
     def extra_state_attributes(self):
         attributes = {}
         data = self.coordinator.data
-        snapshot = getattr(data, "snapshot", None) if data is not None else None
+        snapshot = self.coordinator.snapshot
         day_group = (
             snapshot.day_group_calculations
             if snapshot is not None

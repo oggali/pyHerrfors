@@ -178,6 +178,13 @@ backing off to about once per hour otherwise.
 
 Module layout: see [How it works](#how-it-works). Sensor values are read from `Herrfors.snapshot` with fallback to legacy client attributes.
 
+Unit tests for pricing, date helpers, DuckDB, and snapshot models (no live API or Home Assistant required):
+
+```sh
+pip install -r requirements.txt
+python -m unittest tests.test_pyherrfors_helpers -v
+```
+
 A [`compose.yml`](compose.yml) is provided to run Home Assistant locally with this
 integration mounted live:
 

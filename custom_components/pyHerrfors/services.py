@@ -28,7 +28,6 @@ from .const import DOMAIN
 from .coordinator import HerrforsDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
 
 
 ATTR_DATE: Final = "Date"
