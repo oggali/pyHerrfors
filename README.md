@@ -33,13 +33,24 @@ Herrfors portal  ──(consumption kWh)──┐
 Entso-E API      ──(spot prices €)────┘                                      + DuckDB (/share)
 ```
 
+The integration code is split into focused modules under `custom_components/pyHerrfors/`:
+
+| Module | Role |
+| --- | --- |
+| `client.py` | Orchestrates fetching, caching, and updates |
+| `session.py` | Portal token and aiohttp session lifecycle |
+| `pricing.py` | VAT and electricity price calculations |
+| `db.py` | DuckDB persistence helpers |
+| `dates.py` | Date-range helpers for assembling consumption |
+| `models.py` | `HerrforsSnapshot` dataclass exposed to sensors |
+
 1. A session token for the Herrfors portal is read from `/share/herrfors_token.json`
    and decrypted locally using your e-mail + password (see [Authentication](#authentication)).
 2. Consumption readings are fetched from `portal.herrfors.fi`.
 3. Day-ahead spot prices are fetched from Entso-E for the same period.
 4. The two are merged; VAT, your marginal price, costs and optimization metrics
    are computed, grouped by day / month / year, and written to DuckDB.
-5. Sensors expose the latest day and latest month values.
+5. Sensors expose the latest day and latest month values via a structured `HerrforsSnapshot` (legacy flat attribute names on the client are still populated for compatibility).
 
 ## Requirements
 
@@ -165,20 +176,31 @@ backing off to about once per hour otherwise.
 
 ## Development & testing
 
+Module layout: see [How it works](#how-it-works). Sensor values are read from `Herrfors.snapshot` with fallback to legacy client attributes.
+
+Unit tests for pricing, date helpers, DuckDB, and snapshot models (no live API or Home Assistant required):
+
+```sh
+pip install -r requirements.txt
+python -m unittest tests.test_pyherrfors_helpers -v
+```
+
 ### Auto pull requests
 
-Pushes to `feature/**` or `refactor/**` branches automatically open or update a PR via
-[`.github/workflows/auto-pr.yml`](.github/workflows/auto-pr.yml):
+Pushes to `feature/*` or `refactor/*` branches automatically open or update a PR to
+**`master`** via [`.github/workflows/auto-pr.yml`](.github/workflows/auto-pr.yml).
 
-| Branch pattern | PR base |
-| --- | --- |
-| `feature/*` | `master` |
-| `refactor/*` (other) | `master` |
-| `refactor/client-pr1-*` | `master` |
-| `refactor/client-pr{N}-*` (N > 1) | matching `refactor/client-pr{N-1}-*` branch |
+**One-time setup:** **Settings → Actions → General → Workflow permissions** → enable
+**Allow GitHub Actions to create and approve pull requests**.
 
-Override the base with `[pr-base=branch-name]` in a commit message. After the workflow
-is on `master`, re-trigger existing branches with an empty commit:
+**Existing branches:** the workflow file must be present on the branch that is pushed
+(merge `master` into the branch, or copy `.github/workflows/auto-pr.yml` from
+`master`). Branches created before the workflow existed will not trigger until then.
+
+For the stacked `refactor/client-pr{N}-*` refactor, all PRs target `master`; merge in
+order (pr1 → pr2 → pr3 → pr4). Each PR body notes the suggested merge order.
+
+Re-trigger manually: **Actions → Auto PR → Run workflow** and enter the branch name.
 
 ```sh
 git commit --allow-empty -m "trigger auto-pr"

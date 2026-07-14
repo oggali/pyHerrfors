@@ -10,11 +10,10 @@ import os
 import logging
 from .client import Herrfors
 
-from .const import (SENSOR_TYPES,DOMAIN,CONF_EMAIL, CONF_PASSWORD, CONF_MARGINAL_PRICE, CONF_API_KEY)
+from .const import DOMAIN, CONF_EMAIL, CONF_PASSWORD, CONF_MARGINAL_PRICE, CONF_API_KEY
+from .models import HerrforsSnapshot
 
 _LOGGER = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
-_LOGGER.setLevel(logging.INFO)
 
 
 class HerrforsDataUpdateCoordinator(DataUpdateCoordinator):
@@ -42,6 +41,12 @@ class HerrforsDataUpdateCoordinator(DataUpdateCoordinator):
             update_method=self._async_update_data,
             always_update=False
         )
+
+    @property
+    def snapshot(self) -> HerrforsSnapshot:
+        if self.api is not None:
+            return self.api.snapshot
+        return HerrforsSnapshot()
 
     def get_update_interval(self):
         now = datetime.datetime.now()
@@ -90,7 +95,7 @@ class HerrforsDataUpdateCoordinator(DataUpdateCoordinator):
             _LOGGER.info("Try to update data from API")
             await self.api.update_latest_month(poll_always=force)
             self.last_update = datetime.datetime.now()
-            self.async_update_listeners() # notifies all listeners(e.g. sensors) to update their data
+            self.async_update_listeners()
             return self.api
         except Exception as err:
             raise UpdateFailed(f"Error communicating with API: {err}") from err

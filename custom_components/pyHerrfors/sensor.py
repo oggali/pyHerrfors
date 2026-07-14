@@ -19,8 +19,6 @@ from datetime import timedelta
 # SCAN_INTERVAL = timedelta(minutes=15)
 
 _LOGGER = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
-_LOGGER.setLevel(logging.INFO)
 
 
 async def async_setup_entry(hass: HomeAssistant,
@@ -101,8 +99,14 @@ class HerrforsSensor(CoordinatorEntity, SensorEntity):
     @property
     def native_value(self):
         """Return the state of the sensor."""
-        # _LOGGER.debug(f"Returning for {self._sensor_type} data {getattr(self.coordinator.data, self._sensor_type)} ")
-        return getattr(self.coordinator.data, self._sensor_type)
+        snapshot = self.coordinator.snapshot
+        value = snapshot.get_sensor_value(self._sensor_type)
+        if value is not None:
+            return value
+        data = self.coordinator.data
+        if data is not None:
+            return getattr(data, self._sensor_type, None)
+        return None
 
     @property
     def available(self) -> bool:
@@ -132,42 +136,43 @@ class HerrforsSensor(CoordinatorEntity, SensorEntity):
     @property
     def extra_state_attributes(self):
         attributes = {}
-        if self._sensor_type =="latest_day" and getattr(self.coordinator.data, 'day_group_calculations') is not None:
-            # attributes['day_group_calculations'] = getattr(self.coordinator.data, 'day_group_calculations').to_json(orient='records')
-            attributes['day'] = getattr(self.coordinator.data, 'day_group_calculations').reset_index()['timestamp_tz'].apply(lambda x:x.isoformat()).to_list()
-            attributes['consumption_sum'] = getattr(self.coordinator.data, 'day_group_calculations')['consumption_sum'].to_list()
-            attributes['avg_khw_price_with_alv'] = getattr(self.coordinator.data, 'day_group_calculations')[
-                'day_avg_khw_price_with_alv'].to_list()
-            attributes['electricity_price_euro'] = getattr(self.coordinator.data, 'day_group_calculations')[
-                'price_marg_alv_euro_sum'].to_list()
-            attributes['avg_spot_price_with_vat'] = getattr(self.coordinator.data, 'day_group_calculations')[
-                'prices_cent_vat_avg'].to_list()
+        data = self.coordinator.data
+        snapshot = self.coordinator.snapshot
+        day_group = (
+            snapshot.day_group_calculations
+            if snapshot is not None
+            else getattr(data, "day_group_calculations", None)
+        )
+        month_group = (
+            snapshot.month_group_calculations
+            if snapshot is not None
+            else getattr(data, "month_group_calculations", None)
+        )
+        day_detail = (
+            snapshot.latest_day_detail
+            if snapshot is not None
+            else getattr(data, "latest_day_electricity_price_consumption_calculations", None)
+        )
 
-            # attributes['day_electricity_price_consumption_calc'] = getattr(self.coordinator.data, 'latest_day_electricity_price_consumption_calculations').to_json(
-            #     orient='records')
-            attributes['timestamp_tz'] = getattr(self.coordinator.data,
-                                                                           'latest_day_electricity_price_consumption_calculations')['timestamp_tz'].apply(lambda x:x.isoformat()).to_list()
-            attributes['consumption'] = getattr(self.coordinator.data,
-                                                 'latest_day_electricity_price_consumption_calculations')[
-                'consumption'].to_list()
-            attributes['price_marginal_alv'] = getattr(self.coordinator.data,
-                                                'latest_day_electricity_price_consumption_calculations')[
-                'price_marginal_alv'].to_list()
-            attributes['consumption_price_marginal_alv'] = getattr(self.coordinator.data,
-                                                       'latest_day_electricity_price_consumption_calculations')[
-                'price_marg_alv'].to_list()
-        if self._sensor_type =="latest_month" and getattr(self.coordinator.data, 'month_group_calculations') is not None:
-            attributes['month_group_calculations'] = getattr(self.coordinator.data, 'month_group_calculations').to_json(orient='records')
+        if self._sensor_type == "latest_day" and day_group is not None:
+            attributes['day'] = day_group.reset_index()['timestamp_tz'].apply(lambda x:x.isoformat()).to_list()
+            attributes['consumption_sum'] = day_group['consumption_sum'].to_list()
+            attributes['avg_khw_price_with_alv'] = day_group['day_avg_khw_price_with_alv'].to_list()
+            attributes['electricity_price_euro'] = day_group['price_marg_alv_euro_sum'].to_list()
+            attributes['avg_spot_price_with_vat'] = day_group['prices_cent_vat_avg'].to_list()
 
-            attributes['month'] = getattr(self.coordinator.data, 'month_group_calculations').reset_index()[
-                'timestamp_tz'].apply(lambda x: x.isoformat()).to_list()
-            attributes['consumption_sum'] = getattr(self.coordinator.data, 'month_group_calculations')[
-                'consumption_sum'].to_list()
-            attributes['avg_khw_price_with_alv'] = getattr(self.coordinator.data, 'month_group_calculations')[
-                'month_avg_khw_price_with_alv'].to_list()
-            attributes['electricity_price_euro'] = getattr(self.coordinator.data, 'month_group_calculations')[
-                'price_marg_alv_euro_sum'].to_list()
-            attributes['avg_spot_price_with_vat'] = getattr(self.coordinator.data, 'month_group_calculations')[
-                'prices_cent_vat_avg'].to_list()
+            if day_detail is not None:
+                attributes['timestamp_tz'] = day_detail['timestamp_tz'].apply(lambda x:x.isoformat()).to_list()
+                attributes['consumption'] = day_detail['consumption'].to_list()
+                attributes['price_marginal_alv'] = day_detail['price_marginal_alv'].to_list()
+                attributes['consumption_price_marginal_alv'] = day_detail['price_marg_alv'].to_list()
+
+        if self._sensor_type == "latest_month" and month_group is not None:
+            attributes['month_group_calculations'] = month_group.to_json(orient='records')
+            attributes['month'] = month_group.reset_index()['timestamp_tz'].apply(lambda x: x.isoformat()).to_list()
+            attributes['consumption_sum'] = month_group['consumption_sum'].to_list()
+            attributes['avg_khw_price_with_alv'] = month_group['month_avg_khw_price_with_alv'].to_list()
+            attributes['electricity_price_euro'] = month_group['price_marg_alv_euro_sum'].to_list()
+            attributes['avg_spot_price_with_vat'] = month_group['prices_cent_vat_avg'].to_list()
 
         return attributes

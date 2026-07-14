@@ -36,6 +36,42 @@ def days_later_for_latest(now=None):
     return 2 if now.hour < LATEST_DAY_CUTOFF_HOUR else 1
 
 
+def resolve_time_step(day):
+    """Return portal timeStep in minutes (60 or 15) for a given date."""
+    date_int = int(day.strftime("%Y%m%d"))
+    return 60 if date_int < RESOLUTION_CUTOFF_DATE else 15
+
+
+def build_readings_params(day, previous_day=None, co_id=CO_ID):
+    """Build Herrfors portal /api/charts/readings query parameters."""
+    if previous_day is None:
+        previous_day = day - datetime.timedelta(days=1)
+    time_step = resolve_time_step(day)
+    return {
+        "coId": co_id,
+        "from": f"{previous_day.strftime('%Y-%m-%d')}T22:00:00.000Z",
+        "to": f"{day.strftime('%Y-%m-%d')}T22:00:00.000Z",
+        "price": "true",
+        "temp": "false",
+        "timeStep": str(time_step),
+    }
+
+
+def consumption_params_for_day(day):
+    """Build internal consumption params dict for a single day."""
+    previous_day = day - datetime.timedelta(days=1)
+    return {
+        "date-year": day.year,
+        "date-month": day.month,
+        "date-day": day.day,
+        "date": day.strftime("%Y-%m-%d"),
+        "previous_date-year": previous_day.year,
+        "previous_date-month": previous_day.month,
+        "previous_date-day": previous_day.day,
+        "previous_date": previous_day.strftime("%Y-%m-%d"),
+    }
+
+
 SENSOR_TYPES = {
     "latest_day": "Latest Day",
     "latest_day_electricity_consumption_sum": "Latest Day Electricity Consumption sum",

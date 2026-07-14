@@ -63,3 +63,69 @@ def apply_price_calculations(price_calculations, marginal_price=0):
     price_calculations["price_marg_alv_euro"] = price_calculations["price_marg_alv"] / 100
 
     return price_calculations
+
+
+def group_price_calculations(price_calculations, granularity):
+    """Aggregate interval-level price calculations to day/month/year summaries."""
+    grouped = price_calculations.groupby(
+        pd.Grouper(key="timestamp_tz", freq=granularity)
+    ).agg(
+        {
+            "consumption": "sum",
+            "prices_cent": "mean",
+            "prices_cent_vat": "mean",
+            "price_marginal_alv": "mean",
+            "price": "sum",
+            "price_euro": "sum",
+            "price_vat": "sum",
+            "price_marg_alv": "sum",
+            "price_marg_alv_euro": "sum",
+        }
+    ).rename(
+        columns={
+            "consumption": "consumption_sum",
+            "prices_cent": "prices_cent_avg",
+            "prices_cent_vat": "prices_cent_vat_avg",
+            "price_marginal_alv": "price_marginal_alv_avg",
+            "price": "price_cent_sum",
+            "price_euro": "price_euro_sum",
+            "price_vat": "price_alv_sum",
+            "price_marg_alv": "price_marg_alv_sum",
+            "price_marg_alv_euro": "price_marg_alv_euro_sum",
+        }
+    )
+
+    grouped["granularity"] = granularity
+
+    if granularity == "D":
+        granularity_name = "day"
+    elif granularity == "ME":
+        granularity_name = "month"
+    else:
+        granularity_name = "year"
+
+    if granularity == "D" and len(price_calculations) not in [24, 96]:
+        divisor = 7
+    else:
+        divisor = len(price_calculations)
+
+    grouped[f"{granularity_name}_avg_price_alv"] = grouped["price_alv_sum"] / divisor
+    grouped[f"{granularity_name}_avg_price_alv_marg"] = (
+        grouped["price_marg_alv_sum"] / divisor
+    )
+    grouped[f"{granularity_name}_avg_khw_price_with_alv"] = (
+        grouped["price_alv_sum"] / grouped["consumption_sum"]
+    )
+    grouped[f"{granularity_name}_avg_price_with_avg_spot"] = (
+        grouped["prices_cent_vat_avg"] * grouped["consumption_sum"]
+    ) / divisor
+    grouped[f"{granularity_name}_optimization_efficiency"] = (
+        (grouped["prices_cent_vat_avg"] - grouped[f"{granularity_name}_avg_khw_price_with_alv"])
+        / grouped["prices_cent_vat_avg"]
+    ) * 100
+    grouped[f"{granularity_name}_optimization_savings_eur"] = (
+        (grouped["prices_cent_vat_avg"] * grouped["consumption_sum"])
+        - grouped["price_alv_sum"]
+    ) / 100
+
+    return grouped.round(3), granularity_name

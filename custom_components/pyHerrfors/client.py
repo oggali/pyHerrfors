@@ -11,12 +11,16 @@ from .const import (
     CO_ID,
     PORTAL_READINGS_URL,
     RESOLUTION_CUTOFF_DATE,
+    SENSOR_TYPES,
+    build_readings_params,
+    consumption_params_for_day,
     days_later_for_latest,
+    resolve_time_step,
 )
 from .dates import cached_dates, date_range, filter_date_range, upsert_by_date
 from .db import get_all_from_db_as_df, insert_to_db
 from .models import HerrforsSnapshot, PeriodSummary
-from .pricing import add_vat_to_prices, apply_price_calculations
+from .pricing import add_vat_to_prices, apply_price_calculations, group_price_calculations
 from .session import HerrforsSession
 
 logger = logging.getLogger(__name__)
@@ -110,6 +114,11 @@ class Herrfors:
         await self._portal_session.close()
         return
 
+    def __getattr__(self, name):
+        if name in SENSOR_TYPES:
+            return self.snapshot.get_sensor_value(name)
+        raise AttributeError(f"{type(self).__name__!r} object has no attribute {name!r}")
+
     def _get_latest_day(self, update_self=True):
         """
         Determines the latest day to be considered based on the current hour and calculates related parameters.
@@ -141,15 +150,12 @@ class Herrfors:
         if (self.latest_day is None or latest_day != self.latest_day) and update_self:
 
             self.latest_day = latest_day
-            self.consumption_params = {'date-year':  self.latest_day.year,
-                                      'date-month':  self.latest_day.month,
-                                      'date-day':  self.latest_day.day,
-                                       'date': self.latest_day.strftime('%Y-%m-%d'),
-                                       'previous_date-year': previous_day.year,
-                                       'previous_date-month': previous_day.month,
-                                       'previous_date-day': previous_day.day,
-                                       'previous_date': previous_day.strftime('%Y-%m-%d')
-                                      }
+            self.consumption_params = consumption_params_for_day(latest_day)
+            if previous_day != latest_day - datetime.timedelta(days=1):
+                self.consumption_params["previous_date-year"] = previous_day.year
+                self.consumption_params["previous_date-month"] = previous_day.month
+                self.consumption_params["previous_date-day"] = previous_day.day
+                self.consumption_params["previous_date"] = previous_day.strftime("%Y-%m-%d")
             self.latest_day_electricity_consumption = None
             self.latest_day_electricity_prices = None
         return latest_day
@@ -363,11 +369,7 @@ class Herrfors:
         if not isinstance(date, datetime.date):
             date = datetime.date(int(date.split('-')[0]), int(date.split('-')[1]), int(date.split('-')[2]))
 
-        self.consumption_params = {'date-year': date.year,
-                  'date-month': date.month,
-                  'date-day': date.day,
-                  'date': date.strftime('%Y-%m-%d')
-                  }
+        self.consumption_params = consumption_params_for_day(date)
 
         if date < datetime.date.today():
 
@@ -408,31 +410,45 @@ class Herrfors:
                 granularity = 'Y'
             logger.info(f"Getting consumption for {params.get('date')}")
 
-        if int(params.get('date').replace('-','')) < RESOLUTION_CUTOFF_DATE:
-            time_step = 60
-            self.resolution = 60
+        if granularity == "D" or not params_given:
+            day = datetime.date(
+                int(params.get("date-year")),
+                int(params.get("date-month")),
+                int(params.get("date-day")),
+            )
+            time_step = resolve_time_step(day)
+            self.resolution = time_step
+            logger.info(f"Time step used is {time_step}")
+
+            if params.get("previous_date-year", None) is None:
+                previous_day = day - datetime.timedelta(days=1)
+                params["previous_date-year"] = previous_day.year
+                params["previous_date-month"] = previous_day.month
+                params["previous_date-day"] = previous_day.day
+                params["previous_date"] = previous_day.strftime("%Y-%m-%d")
+
+            requests_params = build_readings_params(
+                day,
+                previous_day=datetime.date(
+                    int(params.get("previous_date-year")),
+                    int(params.get("previous_date-month")),
+                    int(params.get("previous_date-day")),
+                ),
+            )
         else:
-            time_step = 15
-            self.resolution = 15
-        logger.info(f"Time step used is {time_step}")
-
-        if params.get('previous_date-year',None) is None and granularity == 'D':
-            previous_day = datetime.date(int(params.get('date-year')), int(params.get('date-month')),
-                                         int(params.get('date-day'))) - datetime.timedelta(days=1)
-            # add previous params to params dict
-            params['previous_date-year'] = previous_day.year
-            params['previous_date-month'] = previous_day.month
-            params['previous_date-day'] = previous_day.day
-            params['previous_date'] = previous_day.strftime('%Y-%m-%d')
-
-        requests_params = {
-            "coId": CO_ID,
-            "from": f"{params.get('previous_date')}T22:00:00.000Z",
-            "to": f"{params.get('date')}T22:00:00.000Z",
-            "price": "true",
-            "temp": "false",
-            "timeStep": f"{time_step}",
-        }
+            time_step = resolve_time_step(
+                datetime.date.fromisoformat(params.get("date"))
+            )
+            self.resolution = time_step
+            logger.info(f"Time step used is {time_step}")
+            requests_params = {
+                "coId": CO_ID,
+                "from": f"{params.get('previous_date', params.get('date'))}T22:00:00.000Z",
+                "to": f"{params.get('date')}T22:00:00.000Z",
+                "price": "true",
+                "temp": "false",
+                "timeStep": str(time_step),
+            }
 
         url = PORTAL_READINGS_URL
 
@@ -510,88 +526,48 @@ class Herrfors:
                                         prices=self.get_specific_day_prices(date),
                                         granularity='D')
 
-    def group_calculations(self, price_calculations, granularity):
-
-        grouped = price_calculations.groupby(pd.Grouper(key='timestamp_tz', freq=granularity)).agg({
-            'consumption': 'sum',
-            'prices_cent': 'mean',
-            'prices_cent_vat': 'mean',
-            'price_marginal_alv': 'mean',
-            'price': 'sum',
-            'price_euro': 'sum',
-            'price_vat': 'sum',
-            'price_marg_alv': 'sum',
-            'price_marg_alv_euro': 'sum'
-        }).rename(columns={
-            'consumption': 'consumption_sum',
-            'prices_cent': 'prices_cent_avg',
-            'prices_cent_vat': 'prices_cent_vat_avg',
-            'price_marginal_alv': 'price_marginal_alv_avg',
-            'price': 'price_cent_sum',
-            'price_euro': 'price_euro_sum',
-            'price_vat': 'price_alv_sum',
-            'price_marg_alv': 'price_marg_alv_sum',
-            'price_marg_alv_euro': 'price_marg_alv_euro_sum'
-        })
-
-        grouped['granularity'] = granularity
-
-        if granularity == 'D':
-            granularity_name = 'day'
-        elif granularity == 'ME':
-            granularity_name = 'month'
-        else:
-            granularity_name = 'year'
-
-        if granularity == 'D' and len(price_calculations) not in  [24,96]:
-            divisor = 7
-        else:
-            divisor = len(price_calculations)
-
-
-        grouped[f'{granularity_name}_avg_price_alv'] = grouped['price_alv_sum'] / divisor
-        grouped[f'{granularity_name}_avg_price_alv_marg'] = grouped['price_marg_alv_sum'] / divisor
-        grouped[f'{granularity_name}_avg_khw_price_with_alv'] = grouped['price_alv_sum'] / grouped['consumption_sum']
-        grouped[f'{granularity_name}_avg_price_with_avg_spot'] = (grouped['prices_cent_vat_avg'] * grouped[
-            'consumption_sum']) / divisor
-        grouped[f'{granularity_name}_optimization_efficiency'] = ((grouped['prices_cent_vat_avg'] - grouped[
-            f'{granularity_name}_avg_khw_price_with_alv']) / grouped['prices_cent_vat_avg']) * 100
-        grouped[f'{granularity_name}_optimization_savings_eur'] = ((grouped['prices_cent_vat_avg'] * grouped[
-            'consumption_sum']) - grouped['price_alv_sum']) / 100
-
-        # round all aggregated values to 3 decimal
-        grouped = grouped.round(3)
-
+    def _persist_grouped_calculations(self, grouped, granularity, granularity_name):
         self.grouped_calculations = grouped
-        if granularity == 'ME':
-            grouped['month'] = f"{grouped.index[0].year}-{grouped.index[0].month}"
-            # insert month price calc to dd
-            insert_to_db(grouped, 'month_group_calculations')
+
+        if granularity == "ME":
+            grouped["month"] = f"{grouped.index[0].year}-{grouped.index[0].month}"
+            insert_to_db(grouped, "month_group_calculations")
             if self.month_group_calculations is not None:
-                self.month_group_calculations = self.month_group_calculations[self.month_group_calculations['month'].values != grouped['month'].values]
-                self.month_group_calculations=pd.concat([self.month_group_calculations,grouped], axis=0)
+                self.month_group_calculations = self.month_group_calculations[
+                    self.month_group_calculations["month"].values != grouped["month"].values
+                ]
+                self.month_group_calculations = pd.concat(
+                    [self.month_group_calculations, grouped], axis=0
+                )
             else:
                 self.month_group_calculations = grouped
 
-        if granularity == 'D':
-            grouped['date'] = f"{grouped.index[0].year}-{grouped.index[0].month}-{grouped.index[0].day}"
-            # insert day price calc to dd
-            insert_to_db(grouped, 'day_group_calculations')
+        if granularity == "D":
+            grouped["date"] = (
+                f"{grouped.index[0].year}-{grouped.index[0].month}-{grouped.index[0].day}"
+            )
+            insert_to_db(grouped, "day_group_calculations")
             if self.day_group_calculations is not None:
-                self.day_group_calculations = self.day_group_calculations[self.day_group_calculations['date'].values != grouped['date'].values]
-                self.day_group_calculations=pd.concat([self.day_group_calculations,grouped], axis=0)
+                self.day_group_calculations = self.day_group_calculations[
+                    self.day_group_calculations["date"].values != grouped["date"].values
+                ]
+                self.day_group_calculations = pd.concat(
+                    [self.day_group_calculations, grouped], axis=0
+                )
             else:
                 self.day_group_calculations = grouped
 
-        if granularity_name == 'year':
-            grouped['year'] = f"{grouped.index[0].year}"
-            # insert year price calc to dd
-            insert_to_db(grouped, 'year_group_calculations','year')
+        if granularity_name == "year":
+            grouped["year"] = f"{grouped.index[0].year}"
+            insert_to_db(grouped, "year_group_calculations", "year")
             self.year_group_calculations = grouped
 
-
+    def group_calculations(self, price_calculations, granularity):
+        grouped, granularity_name = group_price_calculations(
+            price_calculations, granularity
+        )
+        self._persist_grouped_calculations(grouped, granularity, granularity_name)
         return grouped
-
 
     def refresh_snapshot(self):
         day = None
