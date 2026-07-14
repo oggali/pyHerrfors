@@ -9,16 +9,19 @@ import logging
 import os
 import json
 import duckdb as dd
-import requests
 from .decode_token import decrypt_wrapped_token
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
-logger.setLevel(logging.INFO)
-
 
 TOKEN_FILE = os.getenv("TOKEN_FILE","/share/herrfors_token.json")
 DB_FILE = os.getenv("DB_FILE","/share/herrfors_data.db")
+LATEST_DAY_CUTOFF_HOUR = 6
+
+
+def _days_later_for_latest(now=None):
+    if now is None:
+        now = datetime.datetime.now()
+    return 2 if now.hour < LATEST_DAY_CUTOFF_HOUR else 1
 
 def _db_empty():
     if os.path.exists(DB_FILE):
@@ -144,8 +147,6 @@ class Herrfors:
 
         """
         self.single_day_consumption = None
-        # self.usage_place = usage_place
-        # self.customer_number = customer_number
         self.email = email
         self.password = password
         self.session = None
@@ -154,7 +155,6 @@ class Herrfors:
         self.toke_exp = None
         self.headers = None
         self.time_step = None
-        self.dataSetsYear = None
         self.apikey = apikey
         self.marginal_price = marginal_price
         self.resolution = None
@@ -203,6 +203,12 @@ class Herrfors:
             await self.session.close()
             self.session = None
 
+    def _schedule_session_close(self, session):
+        try:
+            asyncio.get_running_loop().create_task(session.close())
+        except RuntimeError:
+            logger.warning("Could not schedule aiohttp session close; no running event loop")
+
     def get_session_token(self,email=None, password=None):
 
         if not os.path.exists(TOKEN_FILE):
@@ -228,6 +234,10 @@ class Herrfors:
             if password is None:
                 password = self.password
             created_time, self.session_token = decrypt_wrapped_token(token_data.get('token'), email, password)
+            if self.session is not None:
+                old_session = self.session
+                self.session = None
+                self._schedule_session_close(old_session)
             session = aiohttp.ClientSession()
             session.cookie_jar.update_cookies({"__Secure-next-auth.session-token": self.session_token})
             self.session = session
@@ -239,17 +249,6 @@ class Herrfors:
                 "referer": "https://portal.herrfors.fi/fi-FI/charts",
             }
             return True
-
-    def fetch_expiration(self):
-        try:
-            url = "https://portal.herrfors.fi/api/auth/session"
-            r = requests.get(url, cookies={"__Secure-next-auth.session-token": self.session_cookie}, timeout=10)
-            r.raise_for_status()
-            j = r.json()
-            return j.get("expires")
-        except Exception as e:
-            print("Error fetching expiry:", e)
-            return None
 
     async def logout(self):
         """
@@ -264,29 +263,12 @@ class Herrfors:
         await self.__aexit__()
         return
 
-    def get_user_profile(self):
-        """
-        Returns the current user's profile information
-        :return: the user details
-        """
-
-
-    def get_metering_points(self, customer):
-        """
-        Returns the metering points available for the specified customer
-        :param customer: the customer ID
-        :return: the metering points, including a lot of metadata about them
-        """
-
-        #https://meter.katterno.fi//consumption.php?date-year=2024&date-month=12
-        #https://meter.katterno.fi//consumption.php?date-year=2024&date-month=12&date-day=19
-
     def _get_latest_day(self, update_self=True):
         """
         Determines the latest day to be considered based on the current hour and calculates related parameters.
 
-        Calculates the date difference depending on whether the current hour is less than 8,
-        determines two days prior; otherwise, determines one day prior. Constructs the date
+        Calculates the date difference depending on whether the current hour is less than
+        LATEST_DAY_CUTOFF_HOUR, determines two days prior; otherwise, one day prior. Constructs the date
         in string format and initializes related attributes for energy consumption and pricing.
 
         Attributes
@@ -303,11 +285,7 @@ class Herrfors:
         :return: None
         """
 
-        # if hour now is smaller than 6 then get two days later
-        if datetime.datetime.now().hour < 6:
-            self._days_later = 2
-        else:
-            self._days_later = 1
+        self._days_later = _days_later_for_latest()
 
 
         # latest day check
@@ -513,10 +491,6 @@ class Herrfors:
             logger.info(f"We dont' poll data from API every hour, it's now {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         return
 
-    def update_latest_year(self):
-
-        return
-
     async def get_latest_day_consumption(self):
 
         return await self.get_consumption(None)
@@ -538,7 +512,10 @@ class Herrfors:
                 await self.get_specific_day_consumption(start_day)
                 if not self.single_day_consumption.empty:
                     month_df_missing = self.single_day_consumption
-                    self.year_consumption=pd.concat([self.year_consumption, month_df_missing], axis=0)
+                    if self.year_consumption is None:
+                        self.year_consumption = month_df_missing
+                    else:
+                        self.year_consumption = pd.concat([self.year_consumption, month_df_missing], axis=0)
                     month_df = month_df_missing
             else:
                 month_df = self.year_consumption[self.year_consumption['timestamp_tz'].dt.date.values == start_day]
@@ -546,7 +523,10 @@ class Herrfors:
             await self.get_specific_day_consumption(start_day)
             if not self.single_day_consumption.empty:
                 month_df_missing = self.single_day_consumption
-                self.year_consumption = pd.concat([self.year_consumption, month_df_missing], axis=0)
+                if self.year_consumption is None:
+                    self.year_consumption = month_df_missing
+                else:
+                    self.year_consumption = pd.concat([self.year_consumption, month_df_missing], axis=0)
                 month_df = month_df_missing
         fetch_day = start_day + datetime.timedelta(days=1)
 
@@ -580,7 +560,10 @@ class Herrfors:
                 if not month_df_missing.empty:
                     month_df = month_df_missing
             if not month_df_missing.empty:
-                self.year_consumption = pd.concat([self.year_consumption, month_df_missing], axis=0)
+                if self.year_consumption is None:
+                    self.year_consumption = month_df_missing
+                else:
+                    self.year_consumption = pd.concat([self.year_consumption, month_df_missing], axis=0)
 
         return month_df
 
@@ -670,12 +653,11 @@ class Herrfors:
             r = await self.session.get(url, headers=self.headers, params=requests_params, timeout=30)
 
             r_txt = await r.text()
-            # await self.logout()
-            data = json.loads(r_txt)
-
-            consumption_data = data['values']
             if r.status != 200:
-                raise EnvironmentError (r)
+                raise EnvironmentError(r)
+
+            data = json.loads(r_txt)
+            consumption_data = data['values']
 
             logger.debug(f"Get data: {consumption_data}")
 
@@ -690,37 +672,13 @@ class Herrfors:
             #convert timestamp timezone to EET and extract date only to own column
             consumption_data_df['date'] = consumption_data_df['timestamp_tz'].apply(lambda x: x.tz_convert('EET').date())
 
-            def get_hours(day_, step=60):
-                """
-                Generate a list of timestamps for a given day, either split into 15-minute intervals or hourly.
-
-                :param day_: A `datetime` object representing the day.
-                :param step: The interval in minutes (default is 60). Supported values: 15, 60.
-                :return: A list of datetime objects localized to the "Europe/Helsinki" timezone.
-                """
-                # Ensure `day_` begins at midnight
-                day_ = datetime.datetime(year=day_.year, month=day_.month, day=day_.day, hour=0, minute=0, second=0)
-
-                # Define EET timezone
-                import pytz
-                eet = pytz.timezone("Europe/Helsinki")
-
-                # Validate the step value
-                if step not in (15, 60):
-                    raise ValueError("Step must be either 15 or 60 minutes.")
-
-                # Generate timestamps with the given step
-                timestamps = [
-                    eet.localize(day_ + datetime.timedelta(minutes=minutes))
-                    for minutes in range(0, 1440, step)  # 1440 minutes = 24 hours
-                ]
-
-                return timestamps
-
             if check_sum > 0:
-                # todo fix
-                # Validate consumption data matches 96 values
-                if len(consumption_data_df) not in  [96, 24, 92, 100] and granularity == 'D':
+                
+                # Validate consumption data matches 96 values for time step 15 and 24 values for time step 60
+                if len(consumption_data_df) < 96 and time_step == 15 and granularity == 'D':
+                    raise ValueError(f"Invalid consumption data. Expected exactly 96 or 24 hourly consumption values for {consumption_data_df}")
+                    
+                elif len(consumption_data_df) < 24 and time_step == 60 and granularity == 'D':
                     raise ValueError(f"Invalid consumption data. Expected exactly 96 or 24 hourly consumption values for {consumption_data_df}")
 
                 else:
@@ -746,8 +704,10 @@ class Herrfors:
             else:
                 logger.info(f"No data available for given parameters: {params}")
                 if granularity == 'D':
-                    # clear data from single_day_consumption df
-                    self.single_day_consumption=pd.DataFrame(columns=self.single_day_consumption.columns)
+                    empty_columns = ['timestamp_tz', 'consumption']
+                    if self.single_day_consumption is not None:
+                        empty_columns = self.single_day_consumption.columns
+                    self.single_day_consumption = pd.DataFrame(columns=empty_columns)
 
                 return self.single_day_consumption
         else:
@@ -866,7 +826,7 @@ class Herrfors:
         """
 
 
-        if consumption is None or prices is None and (granularity =='D' or granularity is None):
+        if (consumption is None or prices is None) and (granularity == 'D' or granularity is None):
             if self.latest_day_electricity_consumption is None or self.latest_day_electricity_prices is None:
                 await asyncio.gather(self.get_consumption(),
                                      self.get_latest_day_prices())
@@ -896,28 +856,17 @@ class Herrfors:
         # combine_df['timestamp_tz_utc'] = combine_df['timestamp_tz']
         # combine_df['timestamp_tz'] = combine_df['datetime']
 
-        combine_df['price_vat'] = combine_df.apply(lambda row_: row_['price'] * row_['vat'], axis=1)
-
         price_calculations = combine_df
-        price_calculations['price'] = price_calculations.apply(lambda row_: row_['consumption'] * row_['prices_cent'],
-                                                                       axis=1)
-        price_calculations['price_euro'] = price_calculations.apply(lambda row_: row_['price'] / 100, axis=1)
+        fixed_marginal_price = self.marginal_price or 0
 
-        fixed_marginal_price = self.marginal_price
-        if fixed_marginal_price is None:
-            fixed_marginal_price = 0
-
-        price_calculations['price_marginal_alv'] = price_calculations.apply(
-            lambda row_: (row_['prices_cent_vat'] + fixed_marginal_price),
-            axis=1)
-
-        price_calculations['price_vat'] = price_calculations.apply(
-            lambda row_: row_['consumption'] * row_['prices_cent_vat'], axis=1)
-
-        price_calculations['price_marg_alv'] = price_calculations.apply(
-            lambda row_: row_['consumption'] * (row_['prices_cent_vat'] + fixed_marginal_price), axis=1)
-        price_calculations['price_marg_alv_euro'] = price_calculations.apply(
-            lambda row_: row_['price_marg_alv'] / 100, axis=1)
+        price_calculations['price'] = price_calculations['consumption'] * price_calculations['prices_cent']
+        price_calculations['price_euro'] = price_calculations['price'] / 100
+        price_calculations['price_marginal_alv'] = price_calculations['prices_cent_vat'] + fixed_marginal_price
+        price_calculations['price_vat'] = price_calculations['consumption'] * price_calculations['prices_cent_vat']
+        price_calculations['price_marg_alv'] = price_calculations['consumption'] * (
+            price_calculations['prices_cent_vat'] + fixed_marginal_price
+        )
+        price_calculations['price_marg_alv_euro'] = price_calculations['price_marg_alv'] / 100
 
         # insert day price calc to dd
         if granularity != 'YE':
@@ -1017,11 +966,7 @@ class Herrfors:
                                         timeout=380)
 
             if start is None:
-                # if hour now is smaller than 8 then get two days later
-                if datetime.datetime.now().hour < 8:
-                    days_later = 2
-                else:
-                    days_later = 1
+                days_later = _days_later_for_latest()
                 start = pd.Timestamp.now(tz='EET') - pd.Timedelta(days=days_later)
                 start = start.normalize()
                 end = start + pd.Timedelta(days=1)
