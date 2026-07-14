@@ -185,6 +185,28 @@ pip install -r requirements.txt
 python -m unittest tests.test_pyherrfors_helpers -v
 ```
 
+### Auto pull requests
+
+Pushes to `feature/*` or `refactor/*` branches automatically open or update a PR to
+**`master`** via [`.github/workflows/auto-pr.yml`](.github/workflows/auto-pr.yml).
+
+**One-time setup:** **Settings → Actions → General → Workflow permissions** → enable
+**Allow GitHub Actions to create and approve pull requests**.
+
+**Existing branches:** the workflow file must be present on the branch that is pushed
+(merge `master` into the branch, or copy `.github/workflows/auto-pr.yml` from
+`master`). Branches created before the workflow existed will not trigger until then.
+
+For the stacked `refactor/client-pr{N}-*` refactor, all PRs target `master`; merge in
+order (pr1 → pr2 → pr3 → pr4). Each PR body notes the suggested merge order.
+
+Re-trigger manually: **Actions → Auto PR → Run workflow** and enter the branch name.
+
+```sh
+git commit --allow-empty -m "trigger auto-pr"
+git push
+```
+
 A [`compose.yml`](compose.yml) is provided to run Home Assistant locally with this
 integration mounted live:
 
