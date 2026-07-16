@@ -44,11 +44,7 @@ class HerrforsSensor(CoordinatorEntity, SensorEntity):
     def __init__(self, coordinator: HerrforsDataUpdateCoordinator, sensor_type):
         self.coordinator = coordinator
         self._sensor_type = sensor_type
-        # The Id used for addressing the entity in the ui, recorder history etc.
-        self.entity_id = f"{DOMAIN}.{sensor_type}"
-        # unique id in .storage file for ui configuration.
         self._attr_unique_id = f"{DOMAIN}.{sensor_type}"
-        self._attr_name = f"{DOMAIN}.{sensor_type}"
 
         if sensor_type not in  ["latest_day","latest_month"]:
             self._attr_suggested_display_precision = 3
