@@ -106,8 +106,8 @@ class Herrfors:
     async def __aexit__(self, *err):
         await self._portal_session.close()
 
-    def get_session_token(self, email=None, password=None):
-        return self._portal_session.get_session_token(email, password)
+    async def get_session_token(self, email=None, password=None):
+        return await self._portal_session.async_get_session_token(email, password)
 
     async def logout(self):
         await self._portal_session.close()
@@ -158,8 +158,8 @@ class Herrfors:
             self.latest_day_electricity_prices = None
         return latest_day
 
-    def _check_session(self):
-        return self._portal_session.check_session()
+    async def _check_session(self):
+        return await self._portal_session.async_check_session()
 
     async def update_latest_day(self):
         """
@@ -172,7 +172,7 @@ class Herrfors:
             operation.
         """
 
-        if self._check_session():
+        if await self._check_session():
             self._get_latest_day()
             # delete always from year_prices because fetching these again is fairly fast
             if self.year_prices is not None:
@@ -266,7 +266,7 @@ class Herrfors:
         if poll_always or (7 < datetime.datetime.now().hour <= 8):
             logger.info(f"It's now {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} and we start polling data.")
 
-            if self._check_session():
+            if await self._check_session():
                 start_day = datetime.date(year=latest_day.year, month=latest_day.month, day=1)
 
                 last_day = latest_day
@@ -447,7 +447,7 @@ class Herrfors:
 
         logger.info(f"Parameters to request: {requests_params}")
 
-        if self._check_session():
+        if await self._check_session():
 
             r = await self.session.get(url, headers=self.headers, params=requests_params, timeout=30)
 

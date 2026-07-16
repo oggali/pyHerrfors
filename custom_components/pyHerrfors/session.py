@@ -19,6 +19,35 @@ logger = logging.getLogger(__name__)
 TOKEN_FILE = os.getenv("TOKEN_FILE", DEFAULT_TOKEN_FILE)
 
 
+def _load_token_from_file(token_file, email, password):
+    """Load and decrypt a portal token from disk (blocking I/O + crypto)."""
+    if not os.path.exists(token_file):
+        logger.info("No token file found. %s", os.path.abspath(token_file))
+        return None
+
+    with open(token_file, "r", encoding="utf-8") as token_file_handle:
+        token_data = json.load(token_file_handle)
+
+    exp = token_data.get("expires")
+    if not exp:
+        return None
+
+    token_exp = datetime.datetime.fromisoformat(exp.replace("Z", "+00:00"))
+    logger.info("Token expires in %s", token_exp)
+    if not datetime.datetime.now(datetime.timezone.utc) < token_exp:
+        return None
+
+    _created_time, session_token = decrypt_wrapped_token(
+        token_data.get("token"), email, password
+    )
+
+    return {
+        "login_time": token_data.get("token_timestamp"),
+        "token_exp": token_exp,
+        "session_token": session_token,
+    }
+
+
 class HerrforsSession:
     """Manages aiohttp session lifecycle for the Herrfors portal API."""
 
@@ -44,37 +73,10 @@ class HerrforsSession:
                 "Could not schedule aiohttp session close; no running event loop"
             )
 
-    def get_session_token(self, email=None, password=None):
-        if not os.path.exists(TOKEN_FILE):
-            logger.info("No token file found. %s", os.path.abspath(TOKEN_FILE))
-            return False
-
-        with open(TOKEN_FILE, "r", encoding="utf-8") as token_file:
-            token_data = json.load(token_file)
-
-        exp = token_data.get("expires")
-        if not exp:
-            return False
-
-        logger.info(
-            "Token expires in %s",
-            datetime.datetime.fromisoformat(exp.replace("Z", "+00:00")),
-        )
-        dt = datetime.datetime.fromisoformat(exp.replace("Z", "+00:00"))
-        if not datetime.datetime.now(datetime.timezone.utc) < dt:
-            return False
-
-        self.login_time = token_data.get("token_timestamp")
-        self.token_exp = dt
-
-        if email is None:
-            email = self.email
-        if password is None:
-            password = self.password
-
-        _created_time, self.session_token = decrypt_wrapped_token(
-            token_data.get("token"), email, password
-        )
+    def _apply_session_token(self, token_payload):
+        self.login_time = token_payload["login_time"]
+        self.token_exp = token_payload["token_exp"]
+        self.session_token = token_payload["session_token"]
 
         if self.session is not None:
             old_session = self.session
@@ -92,15 +94,29 @@ class HerrforsSession:
             "accept": "application/json, text/plain, */*",
             "referer": PORTAL_CHARTS_REFERER,
         }
+
+    async def async_get_session_token(self, email=None, password=None):
+        if email is None:
+            email = self.email
+        if password is None:
+            password = self.password
+
+        token_payload = await asyncio.to_thread(
+            _load_token_from_file, TOKEN_FILE, email, password
+        )
+        if token_payload is None:
+            return False
+
+        self._apply_session_token(token_payload)
         return True
 
-    def check_session(self):
+    async def async_check_session(self):
         if self.session is None:
-            return self.get_session_token()
+            return await self.async_get_session_token()
         if (
             datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)
         ) > self.token_exp:
-            return self.get_session_token()
+            return await self.async_get_session_token()
 
         logger.info("Session is still valid, so we don't need to get a new one")
         return True
