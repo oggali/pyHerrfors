@@ -30,7 +30,7 @@ from .coordinator import HerrforsDataUpdateCoordinator
 _LOGGER = logging.getLogger(__name__)
 
 
-ATTR_DATE: Final = "Date"
+ATTR_DATE: Final = "date"
 
 ENERGY_PRICES_SERVICE_NAME: Final = "get_consumed_energy_and_prices"
 FORCE_CHECK_LATEST_MONTH = "force_check_latest_month"
@@ -38,7 +38,7 @@ FORCE_UPDATE_CURRENT_YEAR = "force_update_current_year"
 
 SERVICE_SCHEMA_GET_CONSUMPTION: Final = vol.Schema(
     {
-        vol.Required(ATTR_DATE): str
+        vol.Optional(ATTR_DATE): str
     }
 )
 

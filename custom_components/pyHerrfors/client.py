@@ -1,4 +1,4 @@
-#custom_components/pyHerrfors/client.py
+# custom_components/pyHerrfors/client.py
 import datetime
 import pandas as pd
 import asyncio
@@ -51,13 +51,12 @@ class Herrfors:
         self.latest_day_electricity_consumption = None
         self.latest_day_electricity_prices = None
 
-
         self.latest_day_electricity_price_consumption_calculations = None
         self.latest_day_electricity_consumption_sum = None
         self.latest_day_electricity_price_euro = None
         self.latest_day_optimization_savings_eur = None
         self.latest_day_optimization_efficiency = None
-        self.latest_day_avg_price_with_vat= None
+        self.latest_day_avg_price_with_vat = None
         self.latest_day_avg_price_by_avg_spot = None
         self.latest_day_avg_spot_price_with_vat = None
         self.latest_day_avg_khw_price_with_vat = None
@@ -143,7 +142,6 @@ class Herrfors:
 
         self._days_later = days_later_for_latest()
 
-
         # latest day check
         latest_day = datetime.date.today() - datetime.timedelta(days=self._days_later)
         previous_day = datetime.date.today() - datetime.timedelta(days=(self._days_later+1))
@@ -162,7 +160,6 @@ class Herrfors:
 
     def _check_session(self):
         return self._portal_session.check_session()
-
 
     async def update_latest_day(self):
         """
@@ -183,7 +180,7 @@ class Herrfors:
                     self.year_prices = self.year_prices[self.year_prices['date'] != self.latest_day]
             await self.calculate_avg_price(granularity='D')
             logger.info(f"Day {self.latest_day} Electricity consumption was {self.latest_day_electricity_consumption_sum} kWh"
-                  f" Cost was {self.latest_day_electricity_price_euro} € with avg price {self.latest_day_avg_khw_price_with_vat} c/kWh")
+                        f" Cost was {self.latest_day_electricity_price_euro} € with avg price {self.latest_day_avg_khw_price_with_vat} c/kWh")
             await self.logout()
         else:
             logger.info("Session and token is not valid, so we need to wait")
@@ -198,9 +195,8 @@ class Herrfors:
 
         self._get_latest_day()
 
-
         if self._check_session():
-            calc_month = 10 # new client supports only from beginning of November
+            calc_month = 10  # new client supports only from beginning of November
             import calendar
             while calc_month <= self.latest_day.month:
 
@@ -220,7 +216,7 @@ class Herrfors:
 
                     fetch_day = start_day
 
-                    while fetch_day <=last_day:
+                    while fetch_day <= last_day:
                         logger.debug(f"Calculating day level avg for {fetch_day}")
                         if fetch_day not in month_df['timestamp_tz'].dt.date.values:
                             logger.info(f"day {fetch_day} not found yet from consumption info, so let's try again later")
@@ -243,7 +239,7 @@ class Herrfors:
                     f"Month {int(self.latest_day.year)}-{int(calc_month)} Electricity consumption is {self.latest_month_electricity_consumption} kWh"
                     f" Cost is {self.latest_month_electricity_price_euro} € with avg price {self.latest_month_avg_khw_price_with_vat} c/kWh")
 
-                calc_month+=1
+                calc_month += 1
             await self.update_latest_month(True)
             await self.calculate_avg_price(consumption=self.year_consumption, prices=self.year_prices, granularity='YE')
 
@@ -253,35 +249,33 @@ class Herrfors:
         latest_day = self._get_latest_day(update_self=False)
 
         if self.year_consumption is None:
-            poll_always=True
+            poll_always = True
 
         if self.year_consumption is not None:
             if latest_day not in self.year_consumption['date'].values and datetime.datetime.now().hour > 9:
                 logger.info(f"Latest day {latest_day} not found from memory, so let's try to fetch it")
-                poll_always=True
+                poll_always = True
 
         if self.year_prices is not None and self.year_consumption is not None and not poll_always:
             # check if dataframes are same size, if not then there is data missing, and we can try to poll missing ones
-            if len(self.year_consumption)<len(self.year_prices):
+            if len(self.year_consumption) < len(self.year_prices):
                 logger.info(f"Prices df size:{len(self.year_prices)} Consumption df size:{len(self.year_consumption)}")
                 logger.info("Let's try to fill missing days")
-                poll_always=True
-
+                poll_always = True
 
         if poll_always or (7 < datetime.datetime.now().hour <= 8):
             logger.info(f"It's now {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} and we start polling data.")
 
             if self._check_session():
-                start_day = datetime.date(year=latest_day.year,month=latest_day.month,day=1)
+                start_day = datetime.date(year=latest_day.year, month=latest_day.month, day=1)
 
                 last_day = latest_day
-                self.latest_month =f"{latest_day.year}/{latest_day.month}"
+                self.latest_month = f"{latest_day.year}/{latest_day.month}"
 
                 # delete always from year_prices because fetching these again is fairly fast
                 if self.year_prices is not None:
                     if not self.year_prices.empty:
                         self.year_prices = self.year_prices[self.year_prices['timestamp_tz'].dt.month.values != latest_day.month]
-
 
                 logger.info(f"Month {self.latest_month} calculating dates between {start_day} and {last_day}")
 
@@ -303,8 +297,8 @@ class Herrfors:
                     self.year_prices = month_prices
                     month_price_size = 0
 
-                self.month_consumption=month_df
-                self.month_prices=month_prices
+                self.month_consumption = month_df
+                self.month_prices = month_prices
 
                 logger.info(f"Month {self.latest_month} prices df size is {month_price_size} and consumption df size is {len(month_df)}")
 
@@ -363,7 +357,6 @@ class Herrfors:
 
         return filter_date_range(self.year_consumption, start_day, last_day)
 
-
     async def get_specific_day_consumption(self, date):
 
         if not isinstance(date, datetime.date):
@@ -389,7 +382,7 @@ class Herrfors:
         """
 
         params_given = True
-        granularity= ''
+        granularity = ''
         if params is None:
             self._get_latest_day()
 
@@ -398,11 +391,11 @@ class Herrfors:
             params_given = False
 
         else:
-            if params.get('date-day','false') != 'false':
+            if params.get('date-day', 'false') != 'false':
                 get_param = f"{params.get('date-year')}-{params.get('date-month')}-{params.get('date-day')} date"
                 granularity = 'D'
 
-            elif params.get('date-month','false') != 'false':
+            elif params.get('date-month', 'false') != 'false':
                 get_param = f"{params.get('date-year')}-{params.get('date-month')} month"
                 granularity = 'M'
             else:
@@ -472,23 +465,25 @@ class Herrfors:
 
             consumption_data_df = pd.DataFrame(consumption_data)
 
-            #transform date column from str to timestamp
+            # transform date column from str to timestamp
             consumption_data_df['timestamp_tz'] = pd.to_datetime(consumption_data_df['date']).apply(lambda x: x.tz_convert('EET'))
 
-            #convert timestamp timezone to EET and extract date only to own column
+            # convert timestamp timezone to EET and extract date only to own column
             consumption_data_df['date'] = consumption_data_df['timestamp_tz'].apply(lambda x: x.tz_convert('EET').date())
 
             if check_sum > 0:
-                
+
                 # Validate consumption data matches 96 values for time step 15 and 24 values for time step 60
                 if len(consumption_data_df) < 96 and time_step == 15 and granularity == 'D':
-                    raise ValueError(f"Invalid consumption data. Expected exactly 96 or 24 hourly consumption values for {consumption_data_df}")
-                    
+                    raise ValueError(
+                        f"Invalid consumption data. Expected exactly 96 or 24 hourly consumption values for {consumption_data_df}")
+
                 elif len(consumption_data_df) < 24 and time_step == 60 and granularity == 'D':
-                    raise ValueError(f"Invalid consumption data. Expected exactly 96 or 24 hourly consumption values for {consumption_data_df}")
+                    raise ValueError(
+                        f"Invalid consumption data. Expected exactly 96 or 24 hourly consumption values for {consumption_data_df}")
 
                 else:
-                    consumption_df=consumption_data_df
+                    consumption_df = consumption_data_df
 
                 if not params_given:
 
@@ -523,8 +518,8 @@ class Herrfors:
 
         await self.get_specific_day_consumption(date)
         return await self.calculate_avg_price(consumption=self.single_day_consumption,
-                                        prices=self.get_specific_day_prices(date),
-                                        granularity='D')
+                                              prices=self.get_specific_day_prices(date),
+                                              granularity='D')
 
     def _persist_grouped_calculations(self, grouped, granularity, granularity_name):
         self.grouped_calculations = grouped
@@ -609,7 +604,6 @@ class Herrfors:
         )
 
     async def calculate_avg_price(self, consumption=None, prices=None, granularity=None):
-
         """
         Calculates the average electricity price based on consumption and price data inputs
         over specified time granularity. Merges the consumption data with price data, computes
@@ -630,12 +624,11 @@ class Herrfors:
         :rtype: tuple[DataFrame, DataFrame]
         """
 
-
         if (consumption is None or prices is None) and (granularity == 'D' or granularity is None):
             if self.latest_day_electricity_consumption is None or self.latest_day_electricity_prices is None:
                 await asyncio.gather(self.get_consumption(),
                                      self.get_latest_day_prices())
-            granularity='D'
+            granularity = 'D'
             consumption = self.latest_day_electricity_consumption
             prices = self.latest_day_electricity_prices
 
@@ -645,19 +638,18 @@ class Herrfors:
             # take only 'price', 'timestamp_tz' columns from consumption df
             prices_ = consumption[['price', 'timestamp_tz']]
 
-            #rename price to prices
+            # rename price to prices
             prices_.columns = ['prices', 'timestamp_tz']
 
-            prices=add_vat_to_prices(prices_)
-
+            prices = add_vat_to_prices(prices_)
 
         if consumption is None:
             logger.info(f"Can't do electricity calculations no consumption data available ")
             return
         combine_df = pd.merge(consumption, prices, on=['timestamp_tz'], how='left', indicator=True)
 
-        #filter df which has both
-        combine_df=combine_df[combine_df['_merge']=='both']
+        # filter df which has both
+        combine_df = combine_df[combine_df['_merge'] == 'both']
         # combine_df['timestamp_tz_utc'] = combine_df['timestamp_tz']
         # combine_df['timestamp_tz'] = combine_df['datetime']
 
@@ -702,19 +694,16 @@ class Herrfors:
 
         self.refresh_snapshot()
         return price_calculations, grouped
-        
 
     async def get_latest_day_prices(self):
         self.latest_day_electricity_prices = await self.get_electricity_prices(apikey=self.apikey)
 
         return self.latest_day_electricity_prices
 
-
     async def get_specific_day_prices(self, date):
 
-
         if not isinstance(date, pd._libs.tslibs.timestamps.Timestamp):
-            start = pd.Timestamp(int(date.split('-')[0]), int(date.split('-')[1]), int(date.split('-')[2]),tz='EET')
+            start = pd.Timestamp(int(date.split('-')[0]), int(date.split('-')[1]), int(date.split('-')[2]), tz='EET')
             start = start.normalize()
             end = start + pd.Timedelta(hours=23, minutes=59, seconds=59)
         else:
@@ -724,13 +713,12 @@ class Herrfors:
             # delete always from year_prices because fetching these again is fairly fast
             if self.year_prices is not None:
                 if not self.year_prices.empty:
-                    self.year_prices = self.year_prices[self.year_prices['timestamp_tz'].dt.date.values!=date]
+                    self.year_prices = self.year_prices[self.year_prices['timestamp_tz'].dt.date.values != date]
 
         return await self.get_electricity_prices(self.apikey, start, end)
 
-
     @staticmethod
-    async def get_electricity_prices(apikey=None,start=None, end=None, resolution=15):
+    async def get_electricity_prices(apikey=None, start=None, end=None, resolution=15):
         """
         Fetches electricity prices for a given date range using the Entso-E API. This method fetches
         day-ahead electricity prices for the specified country, processes the pricing data, and calculates the VAT-adjusted
@@ -753,10 +741,10 @@ class Herrfors:
         """
 
         if apikey is None:
-            raise ValueError ("Entso-E API key is need!")
-
+            raise ValueError("Entso-E API key is need!")
 
         country_code = 'FI'
+
         def query_entsoe_client(apikey, start, end, resolution=None):
             client = EntsoePandasClient(api_key=apikey,
                                         # Optional parameters:
@@ -792,8 +780,7 @@ class Herrfors:
 
         loop = asyncio.get_running_loop()
         prices = await loop.run_in_executor(None, functools.partial(query_entsoe_client,
-                                                                    apikey,start, end, resolution), )
-
+                                                                    apikey, start, end, resolution), )
 
         # prices = client.query_day_ahead_prices(country_code, start=start, end=end)
         if not prices.empty:
@@ -802,4 +789,3 @@ class Herrfors:
         else:
             logger.info(f"No prices found for {start} and {end}, return was {prices}")
             return None
-
