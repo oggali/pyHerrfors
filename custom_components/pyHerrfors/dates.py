@@ -3,6 +3,27 @@ import datetime
 
 import pandas as pd
 
+from .const import resolve_time_step
+
+
+def expected_intervals(day):
+    """Return required interval count for a day (96 at 15-min, 24 at 60-min)."""
+    return 96 if resolve_time_step(day) == 15 else 24
+
+
+def day_interval_count(consumption_df, day):
+    """Count consumption intervals stored for a calendar day."""
+    if consumption_df is None or consumption_df.empty:
+        return 0
+    if "timestamp_tz" not in consumption_df.columns:
+        return 0
+    return int((consumption_df["timestamp_tz"].dt.date == day).sum())
+
+
+def has_complete_day_consumption(consumption_df, day):
+    """Return True when a day has the full expected number of intervals."""
+    return day_interval_count(consumption_df, day) >= expected_intervals(day)
+
 
 def date_range(start_day, last_day):
     days = []
@@ -13,12 +34,15 @@ def date_range(start_day, last_day):
     return days
 
 
-def cached_dates(consumption_df):
+def cached_dates(consumption_df, *, complete_only=False):
     if consumption_df is None or consumption_df.empty:
         return set()
     if "timestamp_tz" not in consumption_df.columns:
         return set()
-    return set(consumption_df["timestamp_tz"].dt.date)
+    dates = set(consumption_df["timestamp_tz"].dt.date)
+    if not complete_only:
+        return dates
+    return {day for day in dates if has_complete_day_consumption(consumption_df, day)}
 
 
 def filter_date_range(consumption_df, start_day, last_day):

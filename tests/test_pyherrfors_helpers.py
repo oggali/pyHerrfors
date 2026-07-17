@@ -24,7 +24,10 @@ from pyHerrfors.const import (  # noqa: E402
 from pyHerrfors.dates import (  # noqa: E402
     cached_dates,
     date_range,
+    day_interval_count,
+    expected_intervals,
     filter_date_range,
+    has_complete_day_consumption,
     upsert_by_date,
 )
 from pyHerrfors.db import db_empty, get_all_from_db_as_df, insert_to_db  # noqa: E402
@@ -82,6 +85,32 @@ class TestDatesHelpers(unittest.TestCase):
 
     def test_cached_dates_empty(self):
         self.assertEqual(cached_dates(None), set())
+
+    def test_expected_intervals(self):
+        self.assertEqual(expected_intervals(datetime.date(2025, 9, 30)), 24)
+        self.assertEqual(expected_intervals(datetime.date(2025, 10, 1)), 96)
+
+    def test_has_complete_day_consumption(self):
+        day = datetime.date(2025, 10, 1)
+        ts = pd.date_range(day, periods=96, freq="15min", tz="EET")
+        complete = pd.DataFrame({"timestamp_tz": ts, "consumption": [1.0] * 96})
+        partial = complete.head(40)
+
+        self.assertEqual(day_interval_count(complete, day), 96)
+        self.assertTrue(has_complete_day_consumption(complete, day))
+        self.assertFalse(has_complete_day_consumption(partial, day))
+
+    def test_cached_dates_complete_only(self):
+        day = datetime.date(2025, 10, 1)
+        ts = pd.date_range(day, periods=96, freq="15min", tz="EET")
+        complete = pd.DataFrame({"timestamp_tz": ts, "consumption": [1.0] * 96})
+        partial_day = datetime.date(2025, 10, 2)
+        partial_ts = pd.date_range(partial_day, periods=40, freq="15min", tz="EET")
+        partial = pd.DataFrame({"timestamp_tz": partial_ts, "consumption": [1.0] * 40})
+        combined = pd.concat([complete, partial], ignore_index=True)
+
+        self.assertEqual(cached_dates(combined), {day, partial_day})
+        self.assertEqual(cached_dates(combined, complete_only=True), {day})
 
 
 class TestPricing(unittest.TestCase):

@@ -17,7 +17,15 @@ from .const import (
     days_later_for_latest,
     resolve_time_step,
 )
-from .dates import cached_dates, date_range, filter_date_range, upsert_by_date
+from .dates import (
+    cached_dates,
+    date_range,
+    day_interval_count,
+    expected_intervals,
+    filter_date_range,
+    has_complete_day_consumption,
+    upsert_by_date,
+)
 from .db import get_all_from_db_as_df, insert_to_db
 from .models import HerrforsSnapshot, PeriodSummary
 from .pricing import add_vat_to_prices, apply_price_calculations, group_price_calculations
@@ -158,6 +166,17 @@ class Herrfors:
             self.latest_day_electricity_prices = None
         return latest_day
 
+    def is_update_complete(self):
+        """Return True when target latest day has complete consumption and prices."""
+        target_day = self._get_latest_day(update_self=False)
+        if self.latest_day != target_day:
+            return False
+        if self.year_consumption is None or self.year_prices is None:
+            return False
+        if len(self.year_consumption) != len(self.year_prices):
+            return False
+        return has_complete_day_consumption(self.year_consumption, target_day)
+
     async def _check_session(self):
         return await self._portal_session.async_check_session()
 
@@ -251,10 +270,15 @@ class Herrfors:
         if self.year_consumption is None:
             poll_always = True
 
-        if self.year_consumption is not None:
-            if latest_day not in self.year_consumption['date'].values and datetime.datetime.now().hour > 9:
-                logger.info(f"Latest day {latest_day} not found from memory, so let's try to fetch it")
-                poll_always = True
+        if self.year_consumption is not None and not has_complete_day_consumption(
+            self.year_consumption, latest_day
+        ):
+            logger.info(
+                f"Latest day {latest_day} incomplete in memory "
+                f"({day_interval_count(self.year_consumption, latest_day)}/"
+                f"{expected_intervals(latest_day)} intervals), so let's try to fetch it"
+            )
+            poll_always = True
 
         if self.year_prices is not None and self.year_consumption is not None and not poll_always:
             # check if dataframes are same size, if not then there is data missing, and we can try to poll missing ones
@@ -282,10 +306,14 @@ class Herrfors:
                 month_df, month_prices = await asyncio.gather(self.get_specific_month_consumption(start_day, last_day),
                                                               self.get_electricity_prices(self.apikey, start_day, last_day))
                 await self.logout()
-                if latest_day not in month_df['timestamp_tz'].dt.date.values:
-                    logger.info(f"Latest day {latest_day} not found yet, so let's try again later")
-                    self.latest_day = max(month_df['timestamp_tz'].dt.date.values)
-
+                if not has_complete_day_consumption(month_df, latest_day):
+                    logger.info(
+                        f"Latest day {latest_day} not complete yet "
+                        f"({day_interval_count(month_df, latest_day)}/"
+                        f"{expected_intervals(latest_day)} intervals), so let's try again later"
+                    )
+                    if month_df is not None and not month_df.empty:
+                        self.latest_day = max(month_df['timestamp_tz'].dt.date.values)
                 else:
                     logger.info(f"Update self.latest_day to {latest_day}")
                     self.latest_day = latest_day
@@ -344,7 +372,7 @@ class Herrfors:
             start_day = datetime.date(year=year, month=month_num, day=1)
             last_day = datetime.date(year=year, month=month_num, day=res[1])
 
-        known_dates = cached_dates(self.year_consumption)
+        known_dates = cached_dates(self.year_consumption, complete_only=True)
         missing_days = [
             day for day in date_range(start_day, last_day) if day not in known_dates
         ]
@@ -473,14 +501,15 @@ class Herrfors:
 
             if check_sum > 0:
 
-                # Validate consumption data matches 96 values for time step 15 and 24 values for time step 60
-                if len(consumption_data_df) < 96 and time_step == 15 and granularity == 'D':
+                required_intervals = expected_intervals(day)
+                if (
+                    (granularity == 'D' or not params_given)
+                    and len(consumption_data_df) < required_intervals
+                ):
                     raise ValueError(
-                        f"Invalid consumption data. Expected exactly 96 or 24 hourly consumption values for {consumption_data_df}")
-
-                elif len(consumption_data_df) < 24 and time_step == 60 and granularity == 'D':
-                    raise ValueError(
-                        f"Invalid consumption data. Expected exactly 96 or 24 hourly consumption values for {consumption_data_df}")
+                        f"Invalid consumption data. Expected at least {required_intervals} "
+                        f"consumption values for {day}, got {len(consumption_data_df)}"
+                    )
 
                 else:
                     consumption_df = consumption_data_df

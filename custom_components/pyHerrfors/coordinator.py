@@ -57,8 +57,7 @@ class HerrforsDataUpdateCoordinator(DataUpdateCoordinator):
         if self.last_update is None:
             _LOGGER.info(f"update since there wasn't last updated")
             return True
-        elif (len(getattr(self.api, "year_consumption", 1)) == len(getattr(self.api, "year_prices", 2)) and
-                        getattr(self.api,"latest_day",datetime.datetime(1920,1,1)) == (datetime.datetime.now().date() - datetime.timedelta(days=1))):
+        elif self.api.is_update_complete():
             _LOGGER.info("Year consumption and latest day have been updated already")
             return False
 

@@ -13,8 +13,8 @@ from .const import (
 
 def add_vat_to_prices(prices):
     if isinstance(prices, pd.DataFrame):
-        prices_df = prices
-        prices_df["datetime"] = prices["timestamp_tz"]
+        prices_df = prices.copy()
+        prices_df["datetime"] = prices_df["timestamp_tz"]
         prices_df["prices_cent"] = prices_df["prices"]
         prices_df["prices"] = prices_df["prices"] * 10
         prices_df = prices_df[["datetime", "prices", "prices_cent"]]
