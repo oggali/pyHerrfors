@@ -9,6 +9,7 @@ import json
 
 from .const import (
     CO_ID,
+    MIN_NONZERO_CONSUMPTION_INTERVALS,
     PORTAL_READINGS_URL,
     RESOLUTION_CUTOFF_DATE,
     SENSOR_TYPES,
@@ -21,6 +22,7 @@ from .dates import (
     cached_dates,
     date_range,
     day_interval_count,
+    day_nonzero_consumption_count,
     expected_intervals,
     filter_date_range,
     has_complete_day_consumption,
@@ -276,7 +278,9 @@ class Herrfors:
             logger.info(
                 f"Latest day {latest_day} incomplete in memory "
                 f"({day_interval_count(self.year_consumption, latest_day)}/"
-                f"{expected_intervals(latest_day)} intervals), so let's try to fetch it"
+                f"{expected_intervals(latest_day)} intervals, "
+                f"{day_nonzero_consumption_count(self.year_consumption, latest_day)} nonzero), "
+                f"so let's try to fetch it"
             )
             poll_always = True
 
@@ -310,7 +314,9 @@ class Herrfors:
                     logger.info(
                         f"Latest day {latest_day} not complete yet "
                         f"({day_interval_count(month_df, latest_day)}/"
-                        f"{expected_intervals(latest_day)} intervals), so let's try again later"
+                        f"{expected_intervals(latest_day)} intervals, "
+                        f"{day_nonzero_consumption_count(month_df, latest_day)} nonzero), "
+                        f"so let's try again later"
                     )
                     if month_df is not None and not month_df.empty:
                         self.latest_day = max(month_df['timestamp_tz'].dt.date.values)
@@ -501,18 +507,22 @@ class Herrfors:
 
             if check_sum > 0:
 
-                required_intervals = expected_intervals(day)
-                if (
-                    (granularity == 'D' or not params_given)
-                    and len(consumption_data_df) < required_intervals
-                ):
-                    raise ValueError(
-                        f"Invalid consumption data. Expected at least {required_intervals} "
-                        f"consumption values for {day}, got {len(consumption_data_df)}"
-                    )
+                if granularity == 'D' or not params_given:
+                    required_intervals = expected_intervals(day)
+                    if len(consumption_data_df) < required_intervals:
+                        raise ValueError(
+                            f"Invalid consumption data. Expected at least {required_intervals} "
+                            f"consumption values for {day}, got {len(consumption_data_df)}"
+                        )
+                    nonzero_count = day_nonzero_consumption_count(consumption_data_df, day)
+                    if nonzero_count < MIN_NONZERO_CONSUMPTION_INTERVALS:
+                        raise ValueError(
+                            f"Invalid consumption data. Expected at least "
+                            f"{MIN_NONZERO_CONSUMPTION_INTERVALS} non-zero consumption values "
+                            f"for {day}, got {nonzero_count}"
+                        )
 
-                else:
-                    consumption_df = consumption_data_df
+                consumption_df = consumption_data_df
 
                 if not params_given:
 

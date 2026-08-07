@@ -17,6 +17,9 @@ RESOLUTION_CUTOFF_DATE = 20251001
 # Latest available consumption day
 LATEST_DAY_CUTOFF_HOUR = 6
 
+# Minimum non-zero consumption intervals required for a day to be considered complete
+MIN_NONZERO_CONSUMPTION_INTERVALS = 20
+
 # Finnish VAT schedule
 NORMAL_VAT = 0.255
 EARLIER_NORMAL_VAT = 0.24

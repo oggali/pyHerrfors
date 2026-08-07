@@ -18,6 +18,7 @@ if "pyHerrfors" not in sys.modules:
     sys.modules["pyHerrfors"] = _pkg
 
 from pyHerrfors.const import (  # noqa: E402
+    MIN_NONZERO_CONSUMPTION_INTERVALS,
     build_readings_params,
     resolve_time_step,
 )
@@ -25,6 +26,7 @@ from pyHerrfors.dates import (  # noqa: E402
     cached_dates,
     date_range,
     day_interval_count,
+    day_nonzero_consumption_count,
     expected_intervals,
     filter_date_range,
     has_complete_day_consumption,
@@ -100,6 +102,43 @@ class TestDatesHelpers(unittest.TestCase):
         self.assertTrue(has_complete_day_consumption(complete, day))
         self.assertFalse(has_complete_day_consumption(partial, day))
 
+    def test_has_complete_day_consumption_requires_nonzero(self):
+        day = datetime.date(2025, 10, 1)
+        ts = pd.date_range(day, periods=96, freq="15min", tz="EET")
+
+        all_zeros = pd.DataFrame({"timestamp_tz": ts, "consumption": [0.0] * 96})
+        self.assertEqual(day_nonzero_consumption_count(all_zeros, day), 0)
+        self.assertFalse(has_complete_day_consumption(all_zeros, day))
+
+        below_threshold = [1.0] * (MIN_NONZERO_CONSUMPTION_INTERVALS - 1) + [0.0] * (
+            96 - (MIN_NONZERO_CONSUMPTION_INTERVALS - 1)
+        )
+        sparse = pd.DataFrame({"timestamp_tz": ts, "consumption": below_threshold})
+        self.assertEqual(
+            day_nonzero_consumption_count(sparse, day),
+            MIN_NONZERO_CONSUMPTION_INTERVALS - 1,
+        )
+        self.assertFalse(has_complete_day_consumption(sparse, day))
+
+        at_threshold = [1.0] * MIN_NONZERO_CONSUMPTION_INTERVALS + [0.0] * (
+            96 - MIN_NONZERO_CONSUMPTION_INTERVALS
+        )
+        enough = pd.DataFrame({"timestamp_tz": ts, "consumption": at_threshold})
+        self.assertEqual(
+            day_nonzero_consumption_count(enough, day),
+            MIN_NONZERO_CONSUMPTION_INTERVALS,
+        )
+        self.assertTrue(has_complete_day_consumption(enough, day))
+
+        with_nan = enough.copy()
+        with_nan.loc[0, "consumption"] = float("nan")
+        # one of the nonzero slots became NaN → below threshold
+        self.assertEqual(
+            day_nonzero_consumption_count(with_nan, day),
+            MIN_NONZERO_CONSUMPTION_INTERVALS - 1,
+        )
+        self.assertFalse(has_complete_day_consumption(with_nan, day))
+
     def test_cached_dates_complete_only(self):
         day = datetime.date(2025, 10, 1)
         ts = pd.date_range(day, periods=96, freq="15min", tz="EET")
@@ -107,9 +146,12 @@ class TestDatesHelpers(unittest.TestCase):
         partial_day = datetime.date(2025, 10, 2)
         partial_ts = pd.date_range(partial_day, periods=40, freq="15min", tz="EET")
         partial = pd.DataFrame({"timestamp_tz": partial_ts, "consumption": [1.0] * 40})
-        combined = pd.concat([complete, partial], ignore_index=True)
+        zero_day = datetime.date(2025, 10, 3)
+        zero_ts = pd.date_range(zero_day, periods=96, freq="15min", tz="EET")
+        zeros = pd.DataFrame({"timestamp_tz": zero_ts, "consumption": [0.0] * 96})
+        combined = pd.concat([complete, partial, zeros], ignore_index=True)
 
-        self.assertEqual(cached_dates(combined), {day, partial_day})
+        self.assertEqual(cached_dates(combined), {day, partial_day, zero_day})
         self.assertEqual(cached_dates(combined, complete_only=True), {day})
 
 

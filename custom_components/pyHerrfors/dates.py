@@ -3,7 +3,7 @@ import datetime
 
 import pandas as pd
 
-from .const import resolve_time_step
+from .const import MIN_NONZERO_CONSUMPTION_INTERVALS, resolve_time_step
 
 
 def expected_intervals(day):
@@ -20,9 +20,25 @@ def day_interval_count(consumption_df, day):
     return int((consumption_df["timestamp_tz"].dt.date == day).sum())
 
 
+def day_nonzero_consumption_count(consumption_df, day):
+    """Count intervals for a day where consumption is non-zero (NaN treated as zero)."""
+    if consumption_df is None or consumption_df.empty:
+        return 0
+    if "timestamp_tz" not in consumption_df.columns or "consumption" not in consumption_df.columns:
+        return 0
+    day_mask = consumption_df["timestamp_tz"].dt.date == day
+    day_rows = consumption_df.loc[day_mask]
+    nonzero = day_rows["consumption"].fillna(0) != 0
+    return int(nonzero.sum())
+
+
 def has_complete_day_consumption(consumption_df, day):
-    """Return True when a day has the full expected number of intervals."""
-    return day_interval_count(consumption_df, day) >= expected_intervals(day)
+    """Return True when a day has enough intervals and non-zero consumption values."""
+    return (
+        day_interval_count(consumption_df, day) >= expected_intervals(day)
+        and day_nonzero_consumption_count(consumption_df, day)
+        >= MIN_NONZERO_CONSUMPTION_INTERVALS
+    )
 
 
 def date_range(start_day, last_day):
