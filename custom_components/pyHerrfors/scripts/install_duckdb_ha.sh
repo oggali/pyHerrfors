@@ -14,9 +14,16 @@ if [ "$PY_MINOR" -lt 14 ]; then
     python3 -m pip install --no-cache-dir "duckdb==1.3.2"
 else
     echo "Installing duckdb>=1.4.2 (compiling from source, may take 20-40 minutes)..."
-    apk add --no-cache cmake samurai g++ gcc linux-headers musl-dev python3-dev
+    apk add --no-cache cmake g++ gcc linux-headers musl-dev python3-dev
+    # DuckDB requires ninja >= 1.10. Alpine's samurai package is 1.2, so
+    # scikit-build-core ignores it and then fails with NinjaNotFoundError.
+    # The PyPI ninja wheel is musllinux-compatible; put it on PATH so the
+    # isolated duckdb build can find it.
+    python3 -m pip install --no-cache-dir "ninja>=1.10"
+    NINJA_BIN="$(python3 -c 'from ninja import BIN_DIR; print(BIN_DIR)')"
+    export PATH="${NINJA_BIN}:${PATH}"
     python3 -m pip install --no-cache-dir "duckdb>=1.4.2"
-    apk del cmake samurai g++ gcc linux-headers musl-dev python3-dev || true
+    apk del cmake g++ gcc linux-headers musl-dev python3-dev || true
 fi
 
 python3 -c "import duckdb; print('duckdb', duckdb.__version__, 'OK')"
