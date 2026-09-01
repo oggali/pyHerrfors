@@ -1,6 +1,7 @@
 """Constants for the pyherrfors integration."""
 # custom_components/pyHerrfors/const.py
 import datetime
+from zoneinfo import ZoneInfo
 
 DOMAIN = "pyherrfors"
 
@@ -10,6 +11,7 @@ PORTAL_READINGS_URL = f"{PORTAL_BASE_URL}/api/charts/readings"
 PORTAL_CHARTS_REFERER = f"{PORTAL_BASE_URL}/fi-FI/charts"
 PORTAL_CLIENT_ID = "6212c91e-f646-4a74-b3ce-38a4a3df2d9d"
 CO_ID = "60754370"
+HELSINKI_TZ = ZoneInfo("Europe/Helsinki")
 
 # Data resolution cutoff (YYYYMMDD) — 60-min before, 15-min after
 RESOLUTION_CUTOFF_DATE = 20251001
@@ -45,16 +47,30 @@ def resolve_time_step(day):
     return 60 if date_int < RESOLUTION_CUTOFF_DATE else 15
 
 
+def helsinki_midnight_utc_iso(day):
+    """UTC ISO timestamp for local midnight in Europe/Helsinki on `day`."""
+    local_midnight = datetime.datetime(
+        day.year, day.month, day.day, tzinfo=HELSINKI_TZ
+    )
+    utc = local_midnight.astimezone(datetime.timezone.utc)
+    return utc.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+
 def build_readings_params(day, previous_day=None, co_id=CO_ID):
-    """Build Herrfors portal /api/charts/readings query parameters."""
-    if previous_day is None:
-        previous_day = day - datetime.timedelta(days=1)
+    """Build Herrfors portal /api/charts/readings query parameters.
+
+    The portal includes kWh only when ``consumption=true``. ``from``/``to`` are
+    Helsinki local midnight of ``day`` and ``day+1`` (not a fixed 22:00Z, which
+    is wrong during EEST). ``previous_day`` is accepted for call-site
+    compatibility and is not used for the window.
+    """
     time_step = resolve_time_step(day)
     return {
         "coId": co_id,
-        "from": f"{previous_day.strftime('%Y-%m-%d')}T22:00:00.000Z",
-        "to": f"{day.strftime('%Y-%m-%d')}T22:00:00.000Z",
+        "from": helsinki_midnight_utc_iso(day),
+        "to": helsinki_midnight_utc_iso(day + datetime.timedelta(days=1)),
         "price": "true",
+        "consumption": "true",
         "temp": "false",
         "timeStep": str(time_step),
     }

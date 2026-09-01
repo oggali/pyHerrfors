@@ -50,13 +50,21 @@ class TestConstHelpers(unittest.TestCase):
     def test_resolve_time_step_after_cutoff(self):
         self.assertEqual(resolve_time_step(datetime.date(2025, 10, 1)), 15)
 
-    def test_build_readings_params(self):
-        day = datetime.date(2025, 10, 15)
+    def test_build_readings_params_winter(self):
+        day = datetime.date(2026, 1, 15)
         params = build_readings_params(day)
         self.assertEqual(params["coId"], "60754370")
         self.assertEqual(params["timeStep"], "15")
-        self.assertTrue(params["from"].startswith("2025-10-14"))
-        self.assertTrue(params["to"].startswith("2025-10-15"))
+        self.assertEqual(params["consumption"], "true")
+        self.assertEqual(params["from"], "2026-01-14T22:00:00.000Z")
+        self.assertEqual(params["to"], "2026-01-15T22:00:00.000Z")
+
+    def test_build_readings_params_summer(self):
+        day = datetime.date(2026, 8, 19)
+        params = build_readings_params(day)
+        self.assertEqual(params["consumption"], "true")
+        self.assertEqual(params["from"], "2026-08-18T21:00:00.000Z")
+        self.assertEqual(params["to"], "2026-08-19T21:00:00.000Z")
 
 
 class TestDatesHelpers(unittest.TestCase):

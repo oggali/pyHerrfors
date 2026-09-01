@@ -14,6 +14,7 @@ from .const import (
     build_readings_params,
     consumption_params_for_day,
     days_later_for_latest,
+    helsinki_midnight_utc_iso,
     resolve_time_step,
 )
 from .dates import (
@@ -482,11 +483,16 @@ class Herrfors:
             )
             self.resolution = time_step
             logger.info(f"Time step used is {time_step}")
+            start = datetime.date.fromisoformat(
+                params.get("previous_date", params.get("date"))
+            )
+            end = datetime.date.fromisoformat(params.get("date"))
             requests_params = {
                 "coId": CO_ID,
-                "from": f"{params.get('previous_date', params.get('date'))}T22:00:00.000Z",
-                "to": f"{params.get('date')}T22:00:00.000Z",
+                "from": helsinki_midnight_utc_iso(start + datetime.timedelta(days=1)),
+                "to": helsinki_midnight_utc_iso(end + datetime.timedelta(days=1)),
                 "price": "true",
+                "consumption": "true",
                 "temp": "false",
                 "timeStep": str(time_step),
             }
