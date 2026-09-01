@@ -27,8 +27,10 @@ from pyHerrfors.dates import (  # noqa: E402
     date_range,
     day_interval_count,
     day_nonzero_consumption_count,
+    ensure_consumption_column,
     expected_intervals,
     filter_date_range,
+    format_consumption_day_debug,
     has_complete_day_consumption,
     upsert_by_date,
 )
@@ -153,6 +155,27 @@ class TestDatesHelpers(unittest.TestCase):
 
         self.assertEqual(cached_dates(combined), {day, partial_day, zero_day})
         self.assertEqual(cached_dates(combined, complete_only=True), {day})
+
+    def test_ensure_consumption_column_renames_alias(self):
+        day = datetime.date(2025, 10, 1)
+        ts = pd.date_range(day, periods=2, freq="15min", tz="EET")
+        aliased = pd.DataFrame({"timestamp_tz": ts, "value": [1.0, 2.0]})
+        renamed = ensure_consumption_column(aliased)
+        self.assertIn("consumption", renamed.columns)
+        self.assertEqual(list(renamed["consumption"]), [1.0, 2.0])
+
+        already_named = pd.DataFrame({"timestamp_tz": ts, "consumption": [3.0, 4.0]})
+        self.assertIs(ensure_consumption_column(already_named), already_named)
+
+    def test_format_consumption_day_debug_includes_counts(self):
+        day = datetime.date(2025, 10, 1)
+        ts = pd.date_range(day, periods=96, freq="15min", tz="EET")
+        zeros = pd.DataFrame({"timestamp_tz": ts, "consumption": [0.0] * 96})
+        text = format_consumption_day_debug(zeros, day)
+        self.assertIn("day=2025-10-01", text)
+        self.assertIn("nonzero=0/", text)
+        self.assertIn("day_intervals=96/96", text)
+        self.assertIn("empty=True", format_consumption_day_debug(None, day))
 
 
 class TestPricing(unittest.TestCase):

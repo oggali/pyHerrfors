@@ -9,9 +9,7 @@ import json
 
 from .const import (
     CO_ID,
-    MIN_NONZERO_CONSUMPTION_INTERVALS,
     PORTAL_READINGS_URL,
-    RESOLUTION_CUTOFF_DATE,
     SENSOR_TYPES,
     build_readings_params,
     consumption_params_for_day,
@@ -21,10 +19,9 @@ from .const import (
 from .dates import (
     cached_dates,
     date_range,
-    day_interval_count,
-    day_nonzero_consumption_count,
-    expected_intervals,
+    ensure_consumption_column,
     filter_date_range,
+    format_consumption_day_debug,
     has_complete_day_consumption,
     upsert_by_date,
 )
@@ -194,15 +191,36 @@ class Herrfors:
         """
 
         if await self._check_session():
-            self._get_latest_day()
-            # delete always from year_prices because fetching these again is fairly fast
-            if self.year_prices is not None:
-                if not self.year_prices.empty:
-                    self.year_prices = self.year_prices[self.year_prices['date'] != self.latest_day]
-            await self.calculate_avg_price(granularity='D')
-            logger.info(f"Day {self.latest_day} Electricity consumption was {self.latest_day_electricity_consumption_sum} kWh"
-                        f" Cost was {self.latest_day_electricity_price_euro} € with avg price {self.latest_day_avg_khw_price_with_vat} c/kWh")
-            await self.logout()
+            try:
+                self._get_latest_day()
+                logger.info(
+                    "Updating latest day %s (days_later=%s, local_hour=%s)",
+                    self.latest_day,
+                    self._days_later,
+                    datetime.datetime.now().hour,
+                )
+                # delete always from year_prices because fetching these again is fairly fast
+                if self.year_prices is not None:
+                    if not self.year_prices.empty:
+                        self.year_prices = self.year_prices[self.year_prices['date'] != self.latest_day]
+                await self.calculate_avg_price(granularity='D')
+                if not has_complete_day_consumption(
+                    self.latest_day_electricity_consumption, self.latest_day
+                ):
+                    logger.warning(
+                        "Latest day %s is not complete yet (%s); skipping daily calculation",
+                        self.latest_day,
+                        format_consumption_day_debug(
+                            self.latest_day_electricity_consumption, self.latest_day
+                        ),
+                    )
+                    return
+                logger.info(
+                    f"Day {self.latest_day} Electricity consumption was {self.latest_day_electricity_consumption_sum} kWh"
+                    f" Cost was {self.latest_day_electricity_price_euro} € with avg price {self.latest_day_avg_khw_price_with_vat} c/kWh"
+                )
+            finally:
+                await self.logout()
         else:
             logger.info("Session and token is not valid, so we need to wait")
 
@@ -276,11 +294,9 @@ class Herrfors:
             self.year_consumption, latest_day
         ):
             logger.info(
-                f"Latest day {latest_day} incomplete in memory "
-                f"({day_interval_count(self.year_consumption, latest_day)}/"
-                f"{expected_intervals(latest_day)} intervals, "
-                f"{day_nonzero_consumption_count(self.year_consumption, latest_day)} nonzero), "
-                f"so let's try to fetch it"
+                "Latest day %s incomplete in memory (%s), so let's try to fetch it",
+                latest_day,
+                format_consumption_day_debug(self.year_consumption, latest_day),
             )
             poll_always = True
 
@@ -312,11 +328,9 @@ class Herrfors:
                 await self.logout()
                 if not has_complete_day_consumption(month_df, latest_day):
                     logger.info(
-                        f"Latest day {latest_day} not complete yet "
-                        f"({day_interval_count(month_df, latest_day)}/"
-                        f"{expected_intervals(latest_day)} intervals, "
-                        f"{day_nonzero_consumption_count(month_df, latest_day)} nonzero), "
-                        f"so let's try again later"
+                        "Latest day %s not complete yet (%s), so let's try again later",
+                        latest_day,
+                        format_consumption_day_debug(month_df, latest_day),
                     )
                     if month_df is not None and not month_df.empty:
                         self.latest_day = max(month_df['timestamp_tz'].dt.date.values)
@@ -494,33 +508,50 @@ class Herrfors:
 
             logger.debug(f"Get data: {consumption_data}")
 
-            # sum elements inside list for check
             check_sum = len(consumption_data)
-
-            consumption_data_df = pd.DataFrame(consumption_data)
-
-            # transform date column from str to timestamp
-            consumption_data_df['timestamp_tz'] = pd.to_datetime(consumption_data_df['date']).apply(lambda x: x.tz_convert('EET'))
-
-            # convert timestamp timezone to EET and extract date only to own column
-            consumption_data_df['date'] = consumption_data_df['timestamp_tz'].apply(lambda x: x.tz_convert('EET').date())
+            raw_keys = (
+                list(consumption_data[0].keys())
+                if consumption_data and isinstance(consumption_data[0], dict)
+                else None
+            )
+            logger.info(
+                "Portal readings response: status=%s values=%s keys=%s",
+                r.status,
+                check_sum,
+                raw_keys,
+            )
 
             if check_sum > 0:
 
+                consumption_data_df = pd.DataFrame(consumption_data)
+                consumption_data_df = ensure_consumption_column(consumption_data_df)
+                if "consumption" in consumption_data_df.columns:
+                    consumption_data_df["consumption"] = pd.to_numeric(
+                        consumption_data_df["consumption"], errors="coerce"
+                    )
+                elif granularity == "D" or not params_given:
+                    logger.warning(
+                        "Portal readings for %s have no consumption column (keys=%s, columns=%s)",
+                        day,
+                        raw_keys,
+                        list(consumption_data_df.columns),
+                    )
+
+                # transform date column from str to timestamp
+                consumption_data_df['timestamp_tz'] = pd.to_datetime(consumption_data_df['date']).apply(lambda x: x.tz_convert('EET'))
+
+                # convert timestamp timezone to EET and extract date only to own column
+                consumption_data_df['date'] = consumption_data_df['timestamp_tz'].apply(lambda x: x.tz_convert('EET').date())
+
                 if granularity == 'D' or not params_given:
-                    required_intervals = expected_intervals(day)
-                    if len(consumption_data_df) < required_intervals:
-                        raise ValueError(
-                            f"Invalid consumption data. Expected at least {required_intervals} "
-                            f"consumption values for {day}, got {len(consumption_data_df)}"
+                    if not has_complete_day_consumption(consumption_data_df, day):
+                        logger.warning(
+                            "Incomplete consumption for %s (%s); "
+                            "not caching this day until the portal publishes enough non-zero readings",
+                            day,
+                            format_consumption_day_debug(consumption_data_df, day),
                         )
-                    nonzero_count = day_nonzero_consumption_count(consumption_data_df, day)
-                    if nonzero_count < MIN_NONZERO_CONSUMPTION_INTERVALS:
-                        raise ValueError(
-                            f"Invalid consumption data. Expected at least "
-                            f"{MIN_NONZERO_CONSUMPTION_INTERVALS} non-zero consumption values "
-                            f"for {day}, got {nonzero_count}"
-                        )
+                        return None
 
                 consumption_df = consumption_data_df
 
@@ -683,7 +714,10 @@ class Herrfors:
             prices = add_vat_to_prices(prices_)
 
         if consumption is None:
-            logger.info(f"Can't do electricity calculations no consumption data available ")
+            logger.warning(
+                "Can't do electricity calculations; no consumption data available for %s",
+                getattr(self, "latest_day", None),
+            )
             return
         combine_df = pd.merge(consumption, prices, on=['timestamp_tz'], how='left', indicator=True)
 

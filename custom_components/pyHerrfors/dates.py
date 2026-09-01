@@ -5,6 +5,8 @@ import pandas as pd
 
 from .const import MIN_NONZERO_CONSUMPTION_INTERVALS, resolve_time_step
 
+CONSUMPTION_COLUMN_ALIASES = ("consumption", "value", "kwh", "kWh", "energy")
+
 
 def expected_intervals(day):
     """Return required interval count for a day (96 at 15-min, 24 at 60-min)."""
@@ -38,6 +40,49 @@ def has_complete_day_consumption(consumption_df, day):
         day_interval_count(consumption_df, day) >= expected_intervals(day)
         and day_nonzero_consumption_count(consumption_df, day)
         >= MIN_NONZERO_CONSUMPTION_INTERVALS
+    )
+
+
+def ensure_consumption_column(consumption_df):
+    """Rename a known API alias to `consumption` when that column is missing."""
+    if consumption_df is None or consumption_df.empty:
+        return consumption_df
+    if "consumption" in consumption_df.columns:
+        return consumption_df
+    for alias in CONSUMPTION_COLUMN_ALIASES:
+        if alias in consumption_df.columns:
+            return consumption_df.rename(columns={alias: "consumption"})
+    return consumption_df
+
+
+def format_consumption_day_debug(consumption_df, day):
+    """Compact diagnostic string for incomplete or unexpected consumption payloads."""
+    if consumption_df is None or consumption_df.empty:
+        return f"day={day} empty=True"
+    columns = list(consumption_df.columns)
+    total_rows = len(consumption_df)
+    day_intervals = day_interval_count(consumption_df, day)
+    nonzero = day_nonzero_consumption_count(consumption_df, day)
+    dates = {}
+    first_ts = last_ts = None
+    if "timestamp_tz" in consumption_df.columns:
+        dates = {
+            str(key): int(count)
+            for key, count in consumption_df["timestamp_tz"].dt.date.value_counts().items()
+        }
+        first_ts = str(consumption_df["timestamp_tz"].iloc[0])
+        last_ts = str(consumption_df["timestamp_tz"].iloc[-1])
+    cons = ""
+    if "consumption" in consumption_df.columns:
+        series = pd.to_numeric(consumption_df["consumption"], errors="coerce")
+        cons = (
+            f" min={series.min()} max={series.max()} sum={float(series.fillna(0).sum())}"
+            f" nan={int(series.isna().sum())} zero_or_nan={int((series.fillna(0) == 0).sum())}"
+        )
+    return (
+        f"day={day} rows={total_rows} day_intervals={day_intervals}/{expected_intervals(day)}"
+        f" nonzero={nonzero}/{MIN_NONZERO_CONSUMPTION_INTERVALS} columns={columns}"
+        f" dates={dates} first={first_ts} last={last_ts}{cons}"
     )
 
 
