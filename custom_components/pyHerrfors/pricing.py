@@ -6,9 +6,11 @@ from .const import (
     DISCOUNT_VAT_END,
     DISCOUNT_VAT_START,
     EARLIER_NORMAL_VAT,
+    HELSINKI_TZ,
     NEW_NORMAL_VAT_START,
     NORMAL_VAT,
 )
+from .dates import normalize_timestamp_tz
 
 
 def add_vat_to_prices(prices):
@@ -23,10 +25,11 @@ def add_vat_to_prices(prices):
         prices_df = prices_df.reset_index().rename(columns={"index": "datetime"})
         prices_df["prices_cent"] = prices_df["prices"] / 10
 
-    discount_start = pd.Timestamp(DISCOUNT_VAT_START, tz="EET")
-    discount_end = pd.Timestamp(DISCOUNT_VAT_END, tz="EET")
-    new_normal_start = pd.Timestamp(NEW_NORMAL_VAT_START, tz="EET")
+    discount_start = pd.Timestamp(DISCOUNT_VAT_START, tz=HELSINKI_TZ)
+    discount_end = pd.Timestamp(DISCOUNT_VAT_END, tz=HELSINKI_TZ)
+    new_normal_start = pd.Timestamp(NEW_NORMAL_VAT_START, tz=HELSINKI_TZ)
 
+    prices_df["datetime"] = normalize_timestamp_tz(prices_df["datetime"])
     prices_df["vat"] = prices_df["datetime"].apply(
         lambda x: EARLIER_NORMAL_VAT
         if x < discount_start or (discount_end < x < new_normal_start)
@@ -37,9 +40,7 @@ def add_vat_to_prices(prices):
 
     prices_df["prices_cent_vat"] = prices_df["prices_cent"] * (1 + prices_df["vat"])
     prices_df["timestamp_tz"] = prices_df["datetime"]
-    prices_df["date"] = prices_df["timestamp_tz"].apply(
-        lambda x: x.tz_convert("EET").date()
-    )
+    prices_df["date"] = prices_df["timestamp_tz"].dt.date
 
     return prices_df
 

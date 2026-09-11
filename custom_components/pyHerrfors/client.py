@@ -9,6 +9,7 @@ import json
 
 from .const import (
     CO_ID,
+    HELSINKI_TZ,
     PORTAL_READINGS_URL,
     SENSOR_TYPES,
     build_readings_params,
@@ -21,9 +22,11 @@ from .dates import (
     cached_dates,
     date_range,
     ensure_consumption_column,
+    ensure_timestamp_tz,
     filter_date_range,
     format_consumption_day_debug,
     has_complete_day_consumption,
+    normalize_timestamp_tz,
     upsert_by_date,
 )
 from .db import get_all_from_db_as_df, insert_to_db
@@ -177,6 +180,20 @@ class Herrfors:
             return False
         return has_complete_day_consumption(self.year_consumption, target_day)
 
+    def _append_year_prices(self, prices):
+        """Concat new price rows onto the year cache with a consistent timezone."""
+        frames = []
+        if self.year_prices is not None and not self.year_prices.empty:
+            frames.append(self.year_prices)
+        if prices is not None and not prices.empty:
+            frames.append(prices)
+        if not frames:
+            self.year_prices = prices
+            return self.year_prices
+        combined = pd.concat(frames, ignore_index=True)
+        self.year_prices = ensure_timestamp_tz(combined)
+        return self.year_prices
+
     async def _check_session(self):
         return await self._portal_session.async_check_session()
 
@@ -268,10 +285,7 @@ class Herrfors:
                                                            granularity='D')
                         fetch_day = fetch_day + datetime.timedelta(days=1)
 
-                if self.year_prices is not None:
-                    self.year_prices = pd.concat([self.year_prices, month_prices], axis=0)
-                else:
-                    self.year_prices = month_prices
+                self._append_year_prices(month_prices)
 
                 await self.calculate_avg_price(consumption=month_df, prices=month_prices, granularity='ME')
 
@@ -318,9 +332,11 @@ class Herrfors:
                 self.latest_month = f"{latest_day.year}/{latest_day.month}"
 
                 # delete always from year_prices because fetching these again is fairly fast
-                if self.year_prices is not None:
-                    if not self.year_prices.empty:
-                        self.year_prices = self.year_prices[self.year_prices['timestamp_tz'].dt.month.values != latest_day.month]
+                if self.year_prices is not None and not self.year_prices.empty:
+                    self.year_prices = ensure_timestamp_tz(self.year_prices)
+                    self.year_prices = self.year_prices[
+                        self.year_prices['timestamp_tz'].dt.month.values != latest_day.month
+                    ]
 
                 logger.info(f"Month {self.latest_month} calculating dates between {start_day} and {last_day}")
 
@@ -340,7 +356,7 @@ class Herrfors:
                     self.latest_day = latest_day
 
                 if month_prices is not None:
-                    self.year_prices = pd.concat([self.year_prices, month_prices], axis=0)
+                    self._append_year_prices(month_prices)
                     month_price_size = len(month_prices)
                 else:
                     self.year_prices = month_prices
@@ -359,7 +375,7 @@ class Herrfors:
 
                 if month_prices is None and self.month_prices is not None:
                     month_prices = self.month_prices
-                    self.year_prices = pd.concat([self.year_prices, month_prices], axis=0)
+                    self._append_year_prices(month_prices)
 
                 # filter self.latest_day prices and consumption from months dataframes
                 self.latest_day_electricity_prices = month_prices[month_prices['timestamp_tz'].dt.date == self.latest_day]
@@ -543,11 +559,9 @@ class Herrfors:
                         list(consumption_data_df.columns),
                     )
 
-                # transform date column from str to timestamp
-                consumption_data_df['timestamp_tz'] = pd.to_datetime(consumption_data_df['date']).apply(lambda x: x.tz_convert('EET'))
-
-                # convert timestamp timezone to EET and extract date only to own column
-                consumption_data_df['date'] = consumption_data_df['timestamp_tz'].apply(lambda x: x.tz_convert('EET').date())
+                # transform date column from str to Helsinki-local timestamp
+                consumption_data_df['timestamp_tz'] = normalize_timestamp_tz(consumption_data_df['date'])
+                consumption_data_df['date'] = consumption_data_df['timestamp_tz'].dt.date
 
                 if granularity == 'D' or not params_given:
                     if not has_complete_day_consumption(consumption_data_df, day):
@@ -725,6 +739,14 @@ class Herrfors:
                 getattr(self, "latest_day", None),
             )
             return
+        if prices is None or prices.empty:
+            logger.warning(
+                "Can't do electricity calculations; no price data available for %s",
+                getattr(self, "latest_day", None),
+            )
+            return
+        consumption = ensure_timestamp_tz(consumption)
+        prices = ensure_timestamp_tz(prices)
         combine_df = pd.merge(consumption, prices, on=['timestamp_tz'], how='left', indicator=True)
 
         # filter df which has both
@@ -782,7 +804,7 @@ class Herrfors:
     async def get_specific_day_prices(self, date):
 
         if not isinstance(date, pd._libs.tslibs.timestamps.Timestamp):
-            start = pd.Timestamp(int(date.split('-')[0]), int(date.split('-')[1]), int(date.split('-')[2]), tz='EET')
+            start = pd.Timestamp(int(date.split('-')[0]), int(date.split('-')[1]), int(date.split('-')[2]), tz=HELSINKI_TZ)
             start = start.normalize()
             end = start + pd.Timedelta(hours=23, minutes=59, seconds=59)
         else:
@@ -790,9 +812,9 @@ class Herrfors:
             end = start + pd.Timedelta(hours=23, minutes=59, seconds=59)
 
             # delete always from year_prices because fetching these again is fairly fast
-            if self.year_prices is not None:
-                if not self.year_prices.empty:
-                    self.year_prices = self.year_prices[self.year_prices['timestamp_tz'].dt.date.values != date]
+            if self.year_prices is not None and not self.year_prices.empty:
+                self.year_prices = ensure_timestamp_tz(self.year_prices)
+                self.year_prices = self.year_prices[self.year_prices['timestamp_tz'].dt.date.values != date]
 
         return await self.get_electricity_prices(self.apikey, start, end)
 
@@ -833,15 +855,15 @@ class Herrfors:
 
             if start is None:
                 days_later = days_later_for_latest()
-                start = pd.Timestamp.now(tz='EET') - pd.Timedelta(days=days_later)
+                start = pd.Timestamp.now(tz=HELSINKI_TZ) - pd.Timedelta(days=days_later)
                 start = start.normalize()
                 end = start + pd.Timedelta(days=1)
 
             # check that start and end are in correct format, if not modify
             if not isinstance(start, pd._libs.tslibs.timestamps.Timestamp):
-                start = pd.Timestamp(start, tz='EET')
+                start = pd.Timestamp(start, tz=HELSINKI_TZ)
             if not isinstance(end, pd._libs.tslibs.timestamps.Timestamp):
-                end = pd.Timestamp(end, tz='EET') + pd.Timedelta(hours=23, minutes=59, seconds=59)
+                end = pd.Timestamp(end, tz=HELSINKI_TZ) + pd.Timedelta(hours=23, minutes=59, seconds=59)
 
             logger.info(f" Get prices between {start} and {end}")
 

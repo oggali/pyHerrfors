@@ -28,6 +28,7 @@ from pyHerrfors.dates import (  # noqa: E402
     day_interval_count,
     day_nonzero_consumption_count,
     ensure_consumption_column,
+    ensure_timestamp_tz,
     expected_intervals,
     filter_date_range,
     format_consumption_day_debug,
@@ -184,6 +185,89 @@ class TestDatesHelpers(unittest.TestCase):
         self.assertIn("nonzero=0/", text)
         self.assertIn("day_intervals=96/96", text)
         self.assertIn("empty=True", format_consumption_day_debug(None, day))
+
+    def test_normalize_timestamp_tz_unifies_mixed_zones(self):
+        winter = pd.Timestamp("2026-01-15 00:00:00", tz="EET")
+        summer = pd.Timestamp("2026-07-15 00:00:00", tz="Europe/Helsinki")
+        mixed = pd.concat(
+            [
+                pd.DataFrame({"timestamp_tz": [winter], "prices": [1.0]}),
+                pd.DataFrame({"timestamp_tz": [summer], "prices": [2.0]}),
+            ],
+            ignore_index=True,
+        )
+        self.assertEqual(mixed["timestamp_tz"].dtype, object)
+
+        normalized = ensure_timestamp_tz(mixed)
+        self.assertTrue(str(normalized["timestamp_tz"].dtype).endswith("Europe/Helsinki]"))
+        # Instant is preserved: winter EET (+02) stays 00:00 in Helsinki.
+        self.assertEqual(
+            normalized["timestamp_tz"].iloc[0],
+            pd.Timestamp("2026-01-15 00:00:00", tz="Europe/Helsinki"),
+        )
+
+    def test_merge_after_mixed_year_prices_concat(self):
+        """Reproduce HA merge error: consumption is EET, year prices became object."""
+        consumption = pd.DataFrame(
+            {
+                "timestamp_tz": pd.date_range("2026-01-15", periods=2, freq="h", tz="EET"),
+                "consumption": [1.0, 1.0],
+            }
+        )
+        year_prices = pd.concat(
+            [
+                pd.DataFrame(
+                    {
+                        "timestamp_tz": pd.date_range(
+                            "2026-01-15", periods=2, freq="h", tz="EET"
+                        ),
+                        "prices_cent": [5.0, 6.0],
+                    }
+                ),
+                pd.DataFrame(
+                    {
+                        "timestamp_tz": pd.date_range(
+                            "2026-07-15", periods=2, freq="h", tz="Europe/Helsinki"
+                        ),
+                        "prices_cent": [7.0, 8.0],
+                    }
+                ),
+            ],
+            ignore_index=True,
+        )
+        self.assertEqual(year_prices["timestamp_tz"].dtype, object)
+        with self.assertRaises(ValueError):
+            pd.merge(consumption, year_prices, on=["timestamp_tz"], how="left")
+
+        merged = pd.merge(
+            ensure_timestamp_tz(consumption),
+            ensure_timestamp_tz(year_prices),
+            on=["timestamp_tz"],
+            how="left",
+            indicator=True,
+        )
+        self.assertEqual(len(merged), 2)
+        self.assertTrue((merged["_merge"] == "both").all())
+
+    def test_upsert_by_date_mixed_timezones(self):
+        eet = pd.DataFrame(
+            {
+                "timestamp_tz": [pd.Timestamp("2026-01-15 00:00:00", tz="EET")],
+                "consumption": [1.0],
+            }
+        )
+        helsinki = pd.DataFrame(
+            {
+                "timestamp_tz": [
+                    pd.Timestamp("2026-01-15 00:00:00", tz="Europe/Helsinki")
+                ],
+                "consumption": [2.0],
+            }
+        )
+        result = upsert_by_date(eet, [helsinki])
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result["consumption"].iloc[0], 2.0)
+        self.assertTrue(str(result["timestamp_tz"].dtype).endswith("Europe/Helsinki]"))
 
 
 class TestPricing(unittest.TestCase):

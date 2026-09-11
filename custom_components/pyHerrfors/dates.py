@@ -3,9 +3,32 @@ import datetime
 
 import pandas as pd
 
-from .const import MIN_NONZERO_CONSUMPTION_INTERVALS, resolve_time_step
+from .const import HELSINKI_TZ, MIN_NONZERO_CONSUMPTION_INTERVALS, resolve_time_step
 
 CONSUMPTION_COLUMN_ALIASES = ("consumption", "value", "kwh", "kWh", "energy")
+
+
+def normalize_timestamp_tz(series, tz=HELSINKI_TZ):
+    """Coerce a timestamp series to timezone-aware Europe/Helsinki datetimes.
+
+    Concatenating EET with Europe/Helsinki (or winter/summer abbreviation zones)
+    yields object dtype, which pandas cannot use as a merge key.
+    """
+    if series is None:
+        return series
+    converted = pd.to_datetime(series, utc=True, errors="coerce")
+    if isinstance(converted, pd.DatetimeIndex):
+        return converted.tz_convert(tz)
+    return converted.dt.tz_convert(tz)
+
+
+def ensure_timestamp_tz(df, column="timestamp_tz"):
+    """Return a copy of ``df`` with ``column`` normalized to Europe/Helsinki."""
+    if df is None or column not in getattr(df, "columns", []):
+        return df
+    result = df.copy()
+    result[column] = normalize_timestamp_tz(result[column])
+    return result
 
 
 def expected_intervals(day):
@@ -126,5 +149,6 @@ def upsert_by_date(existing_df, new_dfs):
         return pd.DataFrame(columns=["timestamp_tz", "consumption"])
 
     combined = pd.concat(frames, ignore_index=True)
+    combined = ensure_timestamp_tz(combined)
     combined = combined.drop_duplicates(subset=["timestamp_tz"], keep="last")
     return combined.sort_values("timestamp_tz").reset_index(drop=True)
